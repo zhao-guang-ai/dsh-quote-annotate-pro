@@ -59,7 +59,8 @@ const { buildQuoteHeader, nextAnnotationNo, annotationNoOf, parseQuoteBlock, sni
   stripQuoteBlocks, renderAnnotationBlock, renderAnnotationSection, sortAnnotations, draftHasAnnotation,
   looksLikeQuoteFragment, removeBlockFromDraft, renumberAnnotationsInDraft,
   docSourceLabel, pathOfFileAddress, fileNameOfPath, pathRelativeTo, docSourceOf, docProbes, buildDocNotesBatch,
-  docFileNameOfHeader, parseDocSourceHeader, fileResourceAddress, docNotesStore, docNotesStorageKey, noteWhereLabel } = api.__test
+  docFileNameOfHeader, parseDocSourceHeader, fileResourceAddress, docNotesStore, docNotesStorageKey, noteWhereLabel,
+  normalizeExcelSelection, excelSheetLabel, excelLocationOf, isExcelPath, normalizeExcelMeta } = api.__test
 
 test('roleText / anchorLabelOf：轮次与角色文案', () => {
   assert.equal(roleText('assistant-step'), 'DSH 回复')
@@ -547,4 +548,53 @@ test('parseDocSourceHeader：位置行内嵌「（请按…）」指令时也能
   const header = '【批注 1 · 文件 · annotate-test/批注实验文档.docx:p1（请按「Annotation 1：」「Annotation 2：」…逐条回应）】'
   assert.deepEqual(parseDocSourceHeader(header), { path: 'annotate-test/批注实验文档.docx', line: null, page: 1 })
   assert.equal(docFileNameOfHeader(header), '批注实验文档.docx')
+})
+
+test('normalizeExcelSelection：单格 / 区域 / 整行 / 整列', () => {
+  assert.deepEqual(normalizeExcelSelection('A1'), { ref: 'A1', kind: 'cell' })
+  assert.deepEqual(normalizeExcelSelection('A1:C3'), { ref: 'A1:C3', kind: 'range' })
+  assert.deepEqual(normalizeExcelSelection('a1:c3'), { ref: 'A1:C3', kind: 'range' })
+  assert.deepEqual(normalizeExcelSelection('A1:T3', { rowSelected: true }), { ref: '1:3', kind: 'row' })
+  assert.deepEqual(normalizeExcelSelection('A1:A9', { colSelected: true }), { ref: 'A:A', kind: 'col' })
+  assert.deepEqual(normalizeExcelSelection('B2', { rowSelected: true }), { ref: '2:2', kind: 'row' })
+  assert.equal(normalizeExcelSelection(''), null)
+  assert.equal(normalizeExcelSelection('选区的文字'), null)
+})
+
+test('excelLocationOf / excelSheetLabel：sheet 名按 Excel 规则加引号', () => {
+  assert.equal(excelLocationOf('Sheet1', 'A1:C3'), 'Sheet1!A1:C3')
+  assert.equal(excelLocationOf('2024 预算', 'B2'), "'2024 预算'!B2")
+  assert.equal(excelLocationOf("It's", 'A1'), "'It''s'!A1")
+  assert.equal(excelLocationOf('', 'A1'), 'A1')
+  assert.equal(excelLocationOf('Sheet1', ''), '')
+})
+
+test('normalizeExcelMeta：只保留合法字段（读回 localStorage 用）', () => {
+  assert.deepEqual(normalizeExcelMeta({ sheet: 'S', ref: 'A1', kind: 'cell' }), { sheet: 'S', ref: 'A1', kind: 'cell' })
+  assert.equal(normalizeExcelMeta({ ref: '' }), null)
+  assert.equal(normalizeExcelMeta(null), null)
+  assert.equal(normalizeExcelMeta({ ref: 'A1', kind: 'weird' }).kind, 'range')
+})
+
+test('docSourceLabel / buildQuoteHeader：Excel 选区写进位置行', () => {
+  const item = { filePath: 'D:\\ws\\预算.xlsx', excel: { sheet: 'Sheet1', ref: 'A1:C3', kind: 'range' } }
+  assert.equal(docSourceLabel(item), 'D:\\ws\\预算.xlsx:Sheet1!A1:C3')
+  assert.equal(buildQuoteHeader(item, 2), '【批注 2 · 文件 · D:\\ws\\预算.xlsx:Sheet1!A1:C3】')
+})
+
+test('docNotesStore / buildDocNotesBatch：Excel 批注持久化并参与全部发送', () => {
+  const sid = 'test-excel-session'
+  const path = 'D:\\ws\\预算.xlsx'
+  docNotesStore.clear(sid, path)
+  docNotesStore.add(sid, path, { quote: 'Sheet1!A1:C3', comment: '把这里改成 0', excel: { sheet: 'Sheet1', ref: 'A1:C3', kind: 'range' } })
+  docNotesStore.add(sid, path, { quote: 'Sheet1!3:5', comment: '删掉这几行', excel: { sheet: 'Sheet1', ref: '3:5', kind: 'row' } })
+  const notes = docNotesStore.get(sid, path)
+  assert.equal(notes.length, 2)
+  assert.equal(notes[0].excel.sheet, 'Sheet1')
+  assert.equal(notes[1].excel.kind, 'row')
+  const text = buildDocNotesBatch(notes, { path })
+  assert.equal(text.includes('【批注 1 · 文件 · D:\\ws\\预算.xlsx:Sheet1!A1:C3（请按「Annotation 1：」'), true)
+  assert.equal(text.includes('【批注 2 · 文件 · D:\\ws\\预算.xlsx:Sheet1!3:5】'), true)
+  assert.equal(text.includes('批注：把这里改成 0'), true)
+  assert.equal(noteWhereLabel(notes[0]), '')
 })
