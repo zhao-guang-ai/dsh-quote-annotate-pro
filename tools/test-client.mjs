@@ -60,7 +60,7 @@ const { buildQuoteHeader, nextAnnotationNo, annotationNoOf, parseQuoteBlock, sni
   looksLikeQuoteFragment, removeBlockFromDraft, renumberAnnotationsInDraft,
   docSourceLabel, pathOfFileAddress, fileNameOfPath, pathRelativeTo, docSourceOf, docProbes, buildDocNotesBatch,
   docFileNameOfHeader, parseDocSourceHeader, fileResourceAddress, docNotesStore, docNotesStorageKey, noteWhereLabel,
-  normalizeExcelSelection, excelSheetLabel, excelLocationOf, isExcelPath, normalizeExcelMeta } = api.__test
+  normalizeExcelSelection, excelSheetLabel, excelLocationOf, isExcelPath, normalizeExcelMeta, stripExcelSourceSuffix } = api.__test
 
 test('roleText / anchorLabelOf：轮次与角色文案', () => {
   assert.equal(roleText('assistant-step'), 'DSH 回复')
@@ -565,7 +565,7 @@ test('excelLocationOf / excelSheetLabel：sheet 名按 Excel 规则加引号', (
   assert.equal(excelLocationOf('Sheet1', 'A1:C3'), 'Sheet1!A1:C3')
   assert.equal(excelLocationOf('2024 预算', 'B2'), "'2024 预算'!B2")
   assert.equal(excelLocationOf("It's", 'A1'), "'It''s'!A1")
-  assert.equal(excelLocationOf('', 'A1'), 'A1')
+  assert.equal(excelLocationOf('', 'A1'), '!A1') // sheet 名读不到：保留 `!`，别退化成裸 `:A1`
   assert.equal(excelLocationOf('Sheet1', ''), '')
 })
 
@@ -643,4 +643,21 @@ test('位置行往返：csv/ods/带引号的 sheet 名都不污染路径', () =>
     assert.equal(docFileNameOfHeader(h), fileName, suffix)
     assert.equal(buildQuoteHeader({ filePath: '', excel: null }) === '', true)
   }
+})
+
+test('位置行边界：路径含「】」、sheet 名读不到、非 Excel 文件的冒号不能被误剥', () => {
+  // 路径里带「】」时按最后一个「】」收尾，别把路径截断
+  const h1 = '【批注 1 · 文件 · D:\\ws\\预算】2026.xlsx:Sheet1!A1】'
+  assert.deepEqual(parseDocSourceHeader(h1), { path: 'D:\\ws\\预算】2026.xlsx', line: null, page: null })
+  assert.equal(docFileNameOfHeader(h1), '预算】2026.xlsx')
+  // 读不到 sheet 名时生成 `:!A1`，不会被当成行号/页码
+  assert.equal(excelLocationOf('', 'A1'), '!A1')
+  assert.equal(excelLocationOf('', '3:5'), '!3:5')
+  const h2 = '【批注 2 · 文件 · D:\\ws\\预算.xlsx:!A1:C3】'
+  assert.deepEqual(parseDocSourceHeader(h2), { path: 'D:\\ws\\预算.xlsx', line: null, page: null })
+  assert.equal(docFileNameOfHeader(h2), '预算.xlsx')
+  // 非 Excel 文件里的「名字:2024」是路径的一部分，stripExcelSourceSuffix 不能动它
+  assert.equal(stripExcelSourceSuffix('D:\\ws\\文件.txt:2024'), 'D:\\ws\\文件.txt:2024')
+  assert.equal(stripExcelSourceSuffix('D:\\ws\\预算.xlsx:Sheet1!A1'), 'D:\\ws\\预算.xlsx')
+  assert.equal(stripExcelSourceSuffix('D:\\ws\\预算.xlsx:B:D'), 'D:\\ws\\预算.xlsx')
 })

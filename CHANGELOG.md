@@ -16,8 +16,9 @@
 - 宿主没开语音输入插件（或没挂 `speech` Remote）时按钮直接不出现，不做「点了没反应」的 UI；
 - 诊断通道新增 `voice:probe` / `voice:catalog` / `voice:transcribe` / `voice:ok` / `voice:fail`，方便排查麦克风与识别链路。
 
-验证：`node --check`、清单自检、`npm test` 55/55；当前 DSH 环境实测诊断 `voice:probe` →
-`{"speech":true,"recorder":true,"audio":true,"ok":true}`（第三方插件能拿到宿主的 speech Remote）。
+验证：`node --check`、清单自检、`npm test` 56/56；当前 DSH 环境实测诊断 `voice:probe` →
+`{"speech":true,"recorder":true,"audio":true,"ok":true}`（第三方插件能拿到宿主的 speech Remote），
+真机 `voice:transcribe` → `voice:ok` 也跑通（2 秒录音识别 4 个字）。
 
 ### 一并收紧：Excel 与其它预览的批注更稳
 
@@ -31,8 +32,21 @@
 - **末行与评语之间的 4px 缝**（0.4.1 遗留）：末行紧跟评语时用 `:has()` 收掉下边距，实测接缝 **0px**；
 - **位置行往返补测**：`预算.ods:Sheet1!A1:C3`、`数据.csv:Sheet1!3:5`、`'2024 预算'!B2`、`'It''s'!A1`、
   `'Q1!'!A1` 都能还原成原路径，`:L行` / `:p页` 与 Windows 盘符路径都不受影响；
+- **位置行不再被路径里的「】」截断**：改成匹配到最后一个 `】`，`D:\ws\预算】2026.xlsx:Sheet1!A1` 也能还原；
+- **非 Excel 路径的冒号不被误剥**：`D:\ws\文件.txt:2024`、`/tmp/report:2024` 原样保留，
+  只有真 Excel 文件（或后缀里确实带 `!`）才剥定位后缀；
+- **「全部发送」不再丢 sheet 定位**：批量发送时把 `sheet` / 选区一起带上，位置行仍带 `:Sheet1!A1:C3`
+  （之前只带 `filePath/line/page`，发出去只剩文件名）；
+- **读不到 sheet 名也安全**：位置行输出 `:!A1` / `:!3:5`，不会被误当成行号 `:L12` 或页码 `:p3`；
+  sheet 名同时兼容 `.luckysheet-sheets-item-*` 与 `.fortune-sheet-list-item-*` 两套类名；
+- **键盘选区也弹泡**：只在表格里按方向键 / Tab 选单元格时，气泡同样跟随（之前只认鼠标按下）；
+- **拿不到路径就按普通引用**：预览里读不到文件路径时不再造出一条永远发不出去的文件批注；
 - 新增夹具 `annotate-test/批注实验表格.xlsx`（普通 sheet / 带空格 sheet / 带单引号 sheet / 合并单元格 / 公式）
   与 `批注实验数据.csv`、`批注实验数据.tsv`，便于按格式逐个人工验。
+
+已知限制（本版明确不动）：Excel 的「跳回」只能打开工作簿、不能还原 sheet 与选区（Fortune-Sheet 没有暴露
+`setSelection`）；同一文件里多个 sheet 的批注共用一份本地存储（列表里的引用行本身已带 `Sheet!单元格`）；
+Markdown 预览没有行号、docx/PDF 只有页号。
 
 ## 0.4.2 — Excel 预览选区批注（canvas 无可选文字，按选区地址定位）
 
