@@ -1,6 +1,6 @@
 {
   "name": "dsh-quote-annotate-pro",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "划词批注与引用锚点：对话里划词批注（多轮按从上到下编号），文档预览里也能批注（docx/PDF/Markdown/代码按原文划词，xlsx/csv 按单元格选区地址；位置行带文件路径/行/页/选区，先攒后一次性发送）；引用块在输入框和已发送消息里始终可见，点一下跳回原文并高亮。纯客户端，锚点与批注存本地 localStorage。",
   "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "quote", "annotate", "selection", "reference", "anchor"],
   "license": "MIT",

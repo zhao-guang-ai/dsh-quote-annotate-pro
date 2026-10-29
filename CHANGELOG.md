@@ -2,6 +2,23 @@
 
 本项目的所有重要变更都记在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## 0.4.3 — 批注框里也能语音输入（麦克风）
+
+新版 DSH 的输入框带了「语音输入」。本版把这个麦克风搬进批注框 —— 说一段话就能写批注，不用切输入法。
+
+- 批注浮框的**输入框右侧**多了一个麦克风按钮（和宿主输入框同款的描边图标、圆形按钮）；
+- 文件批注面板里展开某条批注后的编辑框也有同一个麦克风；
+- 点一下开始录音：按钮变红 + 呼吸光晕，提示行显示 `正在录音 0:12 · 点击麦克风结束`；再点一下结束并识别，
+  识别结果**按光标位置**插进正在写的批注（不是在末尾硬拼，选中的文字会被替换）；
+- 录音全在浏览器里完成：`MediaRecorder` 采流 → Web Audio 重采样成 16kHz 单声道 PCM16 WAV →
+  交给宿主语音插件的 `speech` Remote（`speech/transcribe`）识别；时长 / 体积上限从宿主 `catalog()` 读（默认 120 秒 / 4MB），到点自动结束；
+- 权限被拒、没有麦克风、没录到声音、识别失败都会在提示行给中文原因，**不会**把半截文字写进批注；
+- 宿主没开语音输入插件（或没挂 `speech` Remote）时按钮直接不出现，不做「点了没反应」的 UI；
+- 诊断通道新增 `voice:probe` / `voice:catalog` / `voice:transcribe` / `voice:ok` / `voice:fail`，方便排查麦克风与识别链路。
+
+验证：`node --check`、清单自检、`npm test` 53/53；当前 DSH 环境实测诊断 `voice:probe` →
+`{"speech":true,"recorder":true,"audio":true,"ok":true}`（第三方插件能拿到宿主的 speech Remote）。
+
 ## 0.4.2 — Excel 预览选区批注（canvas 无可选文字，按选区地址定位）
 
 > 本版由社区贡献 [PR #4](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro/pull/4)（@DoggyHU）合入，
