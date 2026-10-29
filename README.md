@@ -62,7 +62,7 @@
 | **文件批注列表** | 不可编辑预览里的批注先攒起来（不立即写输入框），底部浮条 `批注 · N`：展开可单条编辑/删除/清空，点空白或 Esc 收起，「全部发送」一次性写进输入框 |
 | **文档批注跳回来源** | 点文档批注块 → 用官方 `sidebarRight.openResource` 打开来源文件：文本/代码预览带 `line` 参数自动滚到行并高亮；PDF/Office 打开后滚到对应页 |
 | **代码 / 文本 / Markdown 预览** | 这些不可编辑预览与 docx/pdf 走同一条文件批注链路：位置行带文件名，文本类带 `:L行号`（代码用 `pre .line` 序号回退），Markdown 没有逐行 DOM 故不带行号 |
-| **Excel 预览选区批注（0.4.2）** | xlsx / xls / csv / tsv 的单元格画在 canvas 上、没有可选文字，改用公式栏 Name Box 的选区地址定位：`【批注 1 · 文件 · 预算.xlsx:Sheet1!A1:C3】`；整行 / 整列归一化成 `Sheet1!3:5` / `Sheet1!B:D`，不读单元格内容 |
+| **Excel 预览选区批注（0.4.2 / 0.4.3）** | 表格单元格画在 canvas 上、没有可选文字，改用公式栏 Name Box 的选区地址定位：`【批注 1 · 文件 · 预算.xlsx:Sheet1!A1:C3】`；支持 `xls / xlsx / xlsm / xlsb / xlt / xltx / xltm / ods / ots / fods / numbers / csv / tsv`，整行 / 整列归一化成 `Sheet1!3:5` / `Sheet1!B:D`，不读单元格内容 |
 | **语音输入（0.4.3）** | 批注框输入框右侧的麦克风：点一下说话、再点一下结束，识别结果按光标插进评论（复用宿主「语音输入」插件的识别能力；没开语音插件时按钮不显示） |
 | 中英自适应 | 按钮文案跟随界面语言（沿用上游） |
 
@@ -92,11 +92,13 @@ sidebar-editor）和聊天输入框里的选区仍然不会弹气泡——保持
 
 聊天消息里的划词批注不受影响：仍然「立即插入 + 位置行 + 点击跳回」。
 
-### Excel 预览：选区即定位（0.4.2）
+### Excel 预览：选区即定位（0.4.2，0.4.3 补齐格式）
 
-xlsx / xls / csv / tsv 的单元格由官方预览用 Fortune-Sheet 画在 `<canvas>` 上，`window.getSelection()`
+单元格由官方预览用 Fortune-Sheet 画在 `<canvas>` 上，`window.getSelection()`
 拿不到内容，所以「划词」链路在 Excel 里不触发（0.4.2 之前 Excel 预览只能看、不能批注）。0.4.2 起改为按
-**选区地址**定位：
+**选区地址**定位；0.4.3 把支持的格式补全为 DSH 自己的 excel 分类
+（`xls / xlsx / xlsm / xlsb / xlt / xltx / xltm / ods / ots / fods / numbers` 以及 `csv / tsv`），
+扩展名认不出时只要预览里有 Fortune-Sheet 的标记（`[data-excel-preview]` / `.fortune-name-box`）也照样能用：
 
 1. 打开工作簿 → 点单元格 / 拖选区域 / 点行头或列头选整行整列 → 选区旁浮出「批注」气泡（地址来自公式栏 Name Box）；
 2. 写意见 → 加入底部 `批注 · N` 列表 → 「全部发送」：

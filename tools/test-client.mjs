@@ -619,3 +619,28 @@ test('parseDocSourceHeader / docFileNameOfHeader：Excel 选区后缀不混进�
   assert.deepEqual(parseDocSourceHeader('【批注 5 · 文件 · 预算.xlsx:L12】'), { path: '预算.xlsx', line: 12, page: null })
   assert.deepEqual(parseDocSourceHeader('【批注 6 · 文件 · 批注实验文档.docx:p1】'), { path: '批注实验文档.docx', line: null, page: 1 })
 })
+
+test('isExcelPath：DSH 归为 excel 类的扩展名都要认（xlsm/xlsb/ods/numbers/csv…）', () => {
+  const yes = ['a.xls', 'a.xlsx', 'a.XLSX', 'a.xlsm', 'a.xlsb', 'a.xlt', 'a.xltx', 'a.xltm', 'a.ods', 'a.ots', 'a.fods', 'a.numbers', 'a.csv', 'a.CSV', 'a.tsv', 'D:\\ws\\预算.xlsx', '报表.csv']
+  for (const name of yes) assert.equal(isExcelPath(name), true, name)
+  const no = ['a.docx', 'a.pdf', 'a.md', 'a.txt', 'a.py', 'a.xlsx.md', 'a.xlsx.bak', '', null, undefined]
+  for (const name of no) assert.equal(isExcelPath(name), false, String(name))
+})
+
+test('位置行往返：csv/ods/带引号的 sheet 名都不污染路径', () => {
+  const cases = [
+    ['预算.ods:Sheet1!A1:C3', '预算.ods', '预算.ods'],
+    ['D:\\ws\\数据.csv:Sheet1!3:5', 'D:\\ws\\数据.csv', '数据.csv'],
+    ["D:\\ws\\预算.xlsx:'2024 预算'!B2", 'D:\\ws\\预算.xlsx', '预算.xlsx'],
+    ["D:\\ws\\预算.xlsx:'It''s'!A1", 'D:\\ws\\预算.xlsx', '预算.xlsx'],
+    ["D:\\ws\\预算.xlsx:'Q1!'!A1", 'D:\\ws\\预算.xlsx', '预算.xlsx'],
+    ['D:\\ws\\预算.xlsx:Sheet1!A1', 'D:\\ws\\预算.xlsx', '预算.xlsx'],
+    ['D:\\ws\\无后缀.xlsx', 'D:\\ws\\无后缀.xlsx', '无后缀.xlsx'],
+  ]
+  for (const [suffix, path, fileName] of cases) {
+    const h = '【批注 1 · 文件 · ' + suffix + '】'
+    assert.deepEqual(parseDocSourceHeader(h), { path, line: null, page: null }, suffix)
+    assert.equal(docFileNameOfHeader(h), fileName, suffix)
+    assert.equal(buildQuoteHeader({ filePath: '', excel: null }) === '', true)
+  }
+})

@@ -2,7 +2,7 @@
 
 本项目的所有重要变更都记在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
-## 0.4.3 — 批注框里也能语音输入（麦克风）
+## 0.4.3 — 批注框里也能语音输入（麦克风）+ Excel / 文档预览批注更稳
 
 新版 DSH 的输入框带了「语音输入」。本版把这个麦克风搬进批注框 —— 说一段话就能写批注，不用切输入法。
 
@@ -16,8 +16,23 @@
 - 宿主没开语音输入插件（或没挂 `speech` Remote）时按钮直接不出现，不做「点了没反应」的 UI；
 - 诊断通道新增 `voice:probe` / `voice:catalog` / `voice:transcribe` / `voice:ok` / `voice:fail`，方便排查麦克风与识别链路。
 
-验证：`node --check`、清单自检、`npm test` 53/53；当前 DSH 环境实测诊断 `voice:probe` →
+验证：`node --check`、清单自检、`npm test` 55/55；当前 DSH 环境实测诊断 `voice:probe` →
 `{"speech":true,"recorder":true,"audio":true,"ok":true}`（第三方插件能拿到宿主的 speech Remote）。
+
+### 一并收紧：Excel 与其它预览的批注更稳
+
+- **Excel 扩展名补齐**：DSH 自己把 `xls / xlsx / xlsm / xlsb / xlt / xltx / xltm / ods / ots / fods / numbers`
+  都归为 excel 类预览，`csv / tsv` 走同一个 Fortune-Sheet 渲染器；之前只认 `xlsx / xls / csv / tsv`，
+  其余格式能预览却批注不了。现在按 DSH 的分类全量覆盖；
+- **渲染器兜底**：扩展名不在名单里（新格式 / 自定义后缀）时，只要预览根里真的有 `[data-excel-preview]`
+  或 `.fortune-name-box`，照样按 Excel 处理；反过来也不会把 Markdown / PDF / 代码预览误判成表格；
+- **深色引用块看清边界**：深色下草稿卡片本身已是 `#343537` 级灰，引用块只叠 10% 灰实测约 **1.28:1**
+  （几乎看不出块边界），深色单独抬到 16% → **1.47:1**，评语块 13% → 1.36:1；浅色样式不动；
+- **末行与评语之间的 4px 缝**（0.4.1 遗留）：末行紧跟评语时用 `:has()` 收掉下边距，实测接缝 **0px**；
+- **位置行往返补测**：`预算.ods:Sheet1!A1:C3`、`数据.csv:Sheet1!3:5`、`'2024 预算'!B2`、`'It''s'!A1`、
+  `'Q1!'!A1` 都能还原成原路径，`:L行` / `:p页` 与 Windows 盘符路径都不受影响；
+- 新增夹具 `annotate-test/批注实验表格.xlsx`（普通 sheet / 带空格 sheet / 带单引号 sheet / 合并单元格 / 公式）
+  与 `批注实验数据.csv`、`批注实验数据.tsv`，便于按格式逐个人工验。
 
 ## 0.4.2 — Excel 预览选区批注（canvas 无可选文字，按选区地址定位）
 
