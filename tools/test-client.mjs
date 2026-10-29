@@ -598,3 +598,24 @@ test('docNotesStore / buildDocNotesBatch：Excel 批注持久化并参与全部�
   assert.equal(text.includes('批注：把这里改成 0'), true)
   assert.equal(noteWhereLabel(notes[0]), '')
 })
+
+test('normalizeExcelSelection：整行/整列也接受 Name Box 的 3:5 / B:D 形态', () => {
+  assert.deepEqual(normalizeExcelSelection('3:5'), { ref: '3:5', kind: 'row' })
+  assert.deepEqual(normalizeExcelSelection('3:3'), { ref: '3:3', kind: 'row' })
+  assert.deepEqual(normalizeExcelSelection('B:D'), { ref: 'B:D', kind: 'col' })
+  assert.deepEqual(normalizeExcelSelection('b:b'), { ref: 'B:B', kind: 'col' })
+  // 带行/列头标记时，整片范围仍然收成整行/整列
+  assert.deepEqual(normalizeExcelSelection('A1:T3', { rowSelected: true }), { ref: '1:3', kind: 'row' })
+})
+
+test('parseDocSourceHeader / docFileNameOfHeader：Excel 选区后缀不混进路径', () => {
+  const h1 = '【批注 1 · 文件 · D:\\ws\\预算.xlsx:Sheet1!A1:C3（请按「Annotation 1：」「Annotation 2：」…格式逐条回应我的批注）】'
+  assert.deepEqual(parseDocSourceHeader(h1), { path: 'D:\\ws\\预算.xlsx', line: null, page: null })
+  assert.equal(docFileNameOfHeader(h1), '预算.xlsx')
+  assert.deepEqual(parseDocSourceHeader('【批注 2 · 文件 · 预算.xlsx:Sheet1!3:5】'), { path: '预算.xlsx', line: null, page: null })
+  assert.equal(parseDocSourceHeader("【批注 3 · 文件 · D:\\ws\\预算.xlsx:'2024 预算'!B2】").path, 'D:\\ws\\预算.xlsx')
+  assert.equal(parseDocSourceHeader('【批注 4 · 文件 · D:\\ws\\预算.xlsx:B:D】').path, 'D:\\ws\\预算.xlsx')
+  // 文本类预览的 :L / :p 仍然照常解析（不能被 Excel 后缀规则吃掉）
+  assert.deepEqual(parseDocSourceHeader('【批注 5 · 文件 · 预算.xlsx:L12】'), { path: '预算.xlsx', line: 12, page: null })
+  assert.deepEqual(parseDocSourceHeader('【批注 6 · 文件 · 批注实验文档.docx:p1】'), { path: '批注实验文档.docx', line: null, page: 1 })
+})
