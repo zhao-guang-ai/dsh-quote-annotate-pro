@@ -2,6 +2,44 @@
 
 本项目的所有重要变更都记在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## 0.4.2 — Excel 预览选区批注（canvas 无可选文字，按选区地址定位）
+
+> 本版由社区贡献 [PR #4](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro/pull/4)（@DoggyHU）合入，
+> 另追加两条维护者加固（Name Box 的 `3:5` / `B:D` 形态、位置行的 Excel 后缀不污染跳回路径，见下）。
+
+### Excel 预览也能批注了
+
+xlsx / xls / csv / tsv 由官方预览用 Fortune-Sheet 画在 `<canvas>` 上，单元格没有可选文字，
+所以 0.4.x 的「划词」链路在 Excel 里永远不触发。本版按「**选区即定位**」补上这条链路：
+
+- 打开工作簿 → 点单元格 / 拖选区域 / 点行头或列头选整行整列 → 选区旁出现「批注」气泡；
+- 定位来自公式栏的 Name Box：`Sheet1!A1`、`Sheet1!A1:C3`、`Sheet1!3:5`、`Sheet1!B:D`；
+  sheet 名含空格等特殊字符时按 Excel 规则加引号（`'2024 预算'!B2`）；
+- 意见照旧进「文件批注列表」（预览底部 `批注 · N`），一次「全部发送」带编号写进输入框：
+  `【批注 1 · 文件 · 预算.xlsx:Sheet1!A1:C3】`；
+- 不读单元格内容（大区域也不截断），批注只针对「哪个单元格 / 区域」；
+- 气泡由 Excel 选区 watcher 驱动（150ms 轮询 Name Box + 选区覆盖层，点击后 40ms 内立即算一次），
+  不会被「DOM 选区消失」的延迟隐藏误关（canvas 上本来就没有 DOM 选区）。
+
+### 维护者加固
+
+- **整行 / 整列不再漏判**：`getRangetxt` 按选区结构会给出 `A1:T3` 或 `3:5` / `B:D` 两种形态，
+  原实现只认 `A1:C3`，后两种会静默失效（气泡根本不出现）；现在三种都归一化成 `3:5` / `B:D`。
+- **跳回不再拼错路径**：位置行末尾的 `:Sheet1!A1:C3` 之前会残留在解析出的路径里（点批注块跳回会
+  打开不存在的文件，块上方的文件名也带后缀）；现在解析路径前先剥掉，Excel 批注跳回只打开文件、不定位。
+- 行 / 列头选中判定改成存在性判断（高亮元素只在选中时渲染），不依赖 style 序列化格式。
+
+### 已知限制
+
+- 合并单元格按左上角焦点单元格定位；多个不连续选区只取最后一个（与 Name Box 一致）。
+- 跳回只打开工作簿，不自动选中区域（Fortune-Sheet 没有暴露 `setSelection`）。
+
+### 验证
+
+- `node --check lib/client.js`、`node --check lib/index.js`、`node tools/check-manifest.mjs` 通过
+- `npm test`：**53/53**（新增 8 条：单格 / 区域 / 整行 / 整列归一化、`3:5` / `B:D` 形态、sheet 引号、
+  store 持久化、批量发送、Excel 后缀不混进跳回路径）
+
 ## 0.4.1 — 深色模式适配 + 多行批注（原文含空行）修复
 
 > 本版由社区贡献 [PR #3](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro/pull/3)（@Jayden-27）合入，

@@ -62,6 +62,7 @@
 | **文件批注列表** | 不可编辑预览里的批注先攒起来（不立即写输入框），底部浮条 `批注 · N`：展开可单条编辑/删除/清空，点空白或 Esc 收起，「全部发送」一次性写进输入框 |
 | **文档批注跳回来源** | 点文档批注块 → 用官方 `sidebarRight.openResource` 打开来源文件：文本/代码预览带 `line` 参数自动滚到行并高亮；PDF/Office 打开后滚到对应页 |
 | **代码 / 文本 / Markdown 预览** | 这些不可编辑预览与 docx/pdf 走同一条文件批注链路：位置行带文件名，文本类带 `:L行号`（代码用 `pre .line` 序号回退），Markdown 没有逐行 DOM 故不带行号 |
+| **Excel 预览选区批注（0.4.2）** | xlsx / xls / csv / tsv 的单元格画在 canvas 上、没有可选文字，改用公式栏 Name Box 的选区地址定位：`【批注 1 · 文件 · 预算.xlsx:Sheet1!A1:C3】`；整行 / 整列归一化成 `Sheet1!3:5` / `Sheet1!B:D`，不读单元格内容 |
 | 中英自适应 | 按钮文案跟随界面语言（沿用上游） |
 
 ### 文档预览划词：位置行带文件路径（0.4.0）
@@ -89,6 +90,19 @@ sidebar-editor）和聊天输入框里的选区仍然不会弹气泡——保持
 3. 列表按「会话 + 文件绝对路径」存 `localStorage`，刷新 / 切 tab 不丢；「全部发送」后列表会清空（避免重复插入），需要时继续攒下一批。
 
 聊天消息里的划词批注不受影响：仍然「立即插入 + 位置行 + 点击跳回」。
+
+### Excel 预览：选区即定位（0.4.2）
+
+xlsx / xls / csv / tsv 的单元格由官方预览用 Fortune-Sheet 画在 `<canvas>` 上，`window.getSelection()`
+拿不到内容，所以「划词」链路在 Excel 里不触发（0.4.2 之前 Excel 预览只能看、不能批注）。0.4.2 起改为按
+**选区地址**定位：
+
+1. 打开工作簿 → 点单元格 / 拖选区域 / 点行头或列头选整行整列 → 选区旁浮出「批注」气泡（地址来自公式栏 Name Box）；
+2. 写意见 → 加入底部 `批注 · N` 列表 → 「全部发送」：
+   `【批注 1 · 文件 · 预算.xlsx:Sheet1!A1:C3】`（单格 `Sheet1!A1`、整行 `Sheet1!3:5`、整列 `Sheet1!B:D`）；
+   sheet 名含空格等特殊字符时按 Excel 规则加引号（`'2024 预算'!B2`）；
+3. 不读单元格内容；点已发送的批注块会打开工作簿（Excel 预览不自带定位，暂不自动选中区域）。
+   合并单元格按左上角焦点单元格定位，多个不连续选区只取最后一个（与 Name Box 一致）。
 
 > 文档预览批注的原型来自 [DoggyHU 的 fork](https://github.com/DoggyHU/dsh-quote-annotate-pro)（MIT，
 > `document-preview annotations originally prototyped by DoggyHU`），0.4.0 在最新代码上重做并合并，署名保留。
@@ -274,3 +288,4 @@ MIT，见 [LICENSE](./LICENSE)。
 - 本 fork：修复其在 **DSH 0.2.0-rc.2** 上的 6 个兼容性问题，并补充引用定位相关能力，同样以 MIT 发布
 - 文档预览批注原型：[`DoggyHU/dsh-quote-annotate-pro`](https://github.com/DoggyHU/dsh-quote-annotate-pro)（MIT，2026-10），0.4.0 中重做并合并，保留署名
 - 深色模式适配与多行批注修复：[PR #3](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro/pull/3) by [@Jayden-27](https://github.com/Jayden-27)，0.4.1 中合入
+- Excel 预览选区批注：[PR #4](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro/pull/4) by [@DoggyHU](https://github.com/DoggyHU)，0.4.2 中合入
