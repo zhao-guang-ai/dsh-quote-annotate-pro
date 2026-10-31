@@ -3,10 +3,25 @@
 [![npm version](https://img.shields.io/npm/v/dsh-quote-annotate-pro?color=2ea44f&label=npm)](https://www.npmjs.com/package/dsh-quote-annotate-pro)
 [![ci](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro/actions/workflows/ci.yml/badge.svg)](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/zhao-guang-ai/badge.svg)](https://hub.xerj.org/contributors/zhao-guang-ai)
+
+![Select, annotate, quote: the quote block stays visible in the composer and in sent messages, and one click takes you back to the source](./docs/images/01-hero.png)
 
 **Select → annotate → quote. After you send, the quote is still visible — and one click takes you back to the source.**
 
-Selected text becomes an anchored quote block: in the composer and in the sent message it renders as a **compact quoted snippet** (max 3 lines, the turn/role line hidden), and clicking it jumps back to the source message and highlights it. What the model receives still carries **which annotation it is, which turn and whose message** (`【批注 2 · 第5轮 · DSH 回复】`) plus an instruction to answer with `Annotation 1:`, `Annotation 2:` … — and **each `Annotation N:` in the reply becomes a `批注 N` chip: hover to see the quoted text and your comment, click to jump back to the source.**
+Whether you select text in a chat message or in a document preview in the right sidebar, annotations have one job: **the quote never disappears, the origin is never lost, and you can always get back.**
+
+- **Annotate chats**: select text → 「批注」 bubble → write a comment → a **compact quote block with a round number** lands in the composer and stays visible after sending. Multiple annotations are numbered top-to-bottom in conversation order and renumber themselves automatically.
+- **Per-annotation replies**: the model answers `Annotation 1:`, `Annotation 2:` … and each `Annotation N:` in the reply becomes a `批注 N` chip — hover for the quote and comment, click to jump back to the source.
+- **Annotate document previews**: select text in docx / PDF / Markdown / code previews → notes collect in a **file notes list** → the `批注 · N` bar at the bottom sends them all in one go; each block carries the file and line/page and reopens the source where it came from.
+- **Annotate Excel ranges**: cells are painted on a canvas, so there is no selectable text — notes are located by the formula bar's **range address** (`Sheet1!B2:D7`, whole row `3:5`, whole column `B:D`), for 13 spreadsheet formats (`xlsx / xlsm / xlsb / ods / numbers / csv / tsv` …).
+- **Dictate notes**: the microphone at the right of the annotation input records once, transcribes through the host's voice-input plugin, and inserts the text at the caret.
+- **Client-only and offline**: anchors and notes live in your local `localStorage` — no network requests; dark theme follows the host.
+
+| | |
+|---|---|
+| ![Document preview annotations](./docs/images/02-doc-preview.png)<br>Select in a document preview → collect notes → send once | ![Excel range annotations](./docs/images/03-excel.png)<br>Excel notes are located by range address; cell contents are never read |
+| ![Voice input](./docs/images/04-voice.png)<br>Tap the microphone in the annotation box and speak | ![Dark theme](./docs/images/05-dark.png)<br>The same quote blocks and numbers in the dark theme |
 
 > ⭐ **If this plugin helped you, a Star is the most direct way to support it** → [zhao-guang-ai/dsh-quote-annotate-pro](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro) (it also helps other DSH users find it).
 >

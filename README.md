@@ -5,9 +5,47 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/zhao-guang-ai/badge.svg)](https://hub.xerj.org/contributors/zhao-guang-ai)
 
+![划词批注与引用：输入框和已发送消息里的引用块，点一下跳回原文](./docs/images/01-hero.png)
+
 **划词 → 批注 → 引用；发送之后，引用块仍然看得见，点一下就能回到原文。**
 
-选中的文字变成带锚点的引用块：输入框里、已发送的消息里都只显示**紧凑的原文片段**（最多 3 行，轮次/角色那一行被隐藏），点它跳回原文并高亮；而发给模型的文本仍标明**这是第几处批注 + 哪一轮 + 谁说的**（`【批注 2 · 第5轮 · DSH 回复】`），并要求模型按 `Annotation 1：`、`Annotation 2：` 逐条回应 —— **回复里的每个 `Annotation N：` 都会渲染成 `批注 N` 芯片，悬浮看原文与评语，点击跳回原文。**
+不管是在聊天里划词，还是在右侧文档预览里划词，批注都只有一件事要保证：**引用不消失、出处不丢、回得去。**
+
+- **聊天划词批注**：选中文字 → 气泡「批注」→ 写评语 → 输入框里出现**带圆形编号的紧凑引用块**，发送后仍然可见；
+  多条批注按**对话从上到下**自动编号 1、2、3…，先批注后文再回头补前文也会自动重排。
+- **回复逐条对照**：模型按 `Annotation 1：`、`Annotation 2：` 逐条回答，回复里每个 `Annotation N：` 变成 `批注 N` 芯片
+  —— 悬浮看原文与评语，点击跳回原文。
+- **文档预览批注**：docx / PDF / Markdown / 代码预览里划词 → 先进「文件批注列表」→ 底部浮条 `批注 · N`
+  攒够了一次性「全部发送」；位置行带文件与行/页，点批注块重新打开来源并定位。
+- **Excel 选区批注**：单元格画在 canvas 上选不了字，改用公式栏 Name Box 的**选区地址**定位
+  （`Sheet1!B2:D7`、整行 `3:5`、整列 `B:D`），支持 `xlsx / xlsm / xlsb / ods / numbers / csv / tsv` 等 13 种表格格式。
+- **语音输入**：批注框输入框右侧有麦克风，点一下说话、再点一下结束，识别结果按光标位置插进评论。
+- **纯客户端、零网络**：锚点与批注只写本机 `localStorage`，不发任何网络请求；深色主题跟随宿主。
+
+| | |
+|---|---|
+| ![文档预览批注](./docs/images/02-doc-preview.png)<br>文档预览里划词 → 加入批注列表 → 一次发送 | ![Excel 选区批注](./docs/images/03-excel.png)<br>Excel 按选区地址定位，不读单元格内容 |
+| ![语音输入](./docs/images/04-voice.png)<br>批注框里点麦克风，说完自动识别插入 | ![深色模式](./docs/images/05-dark.png)<br>深色主题下同一套引用块与编号 |
+
+## 安装
+
+```sh
+# 从 npm 安装（推荐，一步到位）
+dsh plugin --profile <profile> add dsh-quote-annotate-pro
+
+# 或直接从 GitHub 安装
+dsh plugin --profile <profile> add github:zhao-guang-ai/dsh-quote-annotate-pro
+
+# 本地开发：
+#   <本仓库绝对路径> 为克隆后的目录；link 安装后改文件即刻热更，无需重启
+dsh plugin --profile <profile> add <本仓库绝对路径>
+```
+
+装好后 profile 的 `package.json` 会出现：
+
+```
+"dsh-quote-annotate-pro": "link:<本仓库绝对路径>"
+```
 
 > ⭐ **如果这个插件帮到了你，点个 Star 是最直接的支持** → [zhao-guang-ai/dsh-quote-annotate-pro](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro)（也会让更多 DSH 用户找到它）
 >
@@ -125,26 +163,6 @@ sidebar-editor）和聊天输入框里的选区仍然不会弹气泡——保持
 > 上游 v0.1.1 在 **DSH 0.2.0-rc.2** 上会**静默失效**（既不报错也不注册任何 UI），本 fork 修掉了 4 个兼容性问题，
 > 并补上了 3 项能力；另有 2 个接口变化（当前会话、chip DOM 定位）一并适配。许可仍为 MIT，见 [LICENSE](./LICENSE)。
 > 完整汇总见 [SUMMARY.md](./SUMMARY.md)。
-
-## 安装
-
-```sh
-# 从 npm 安装（推荐，一步到位）
-dsh plugin --profile <profile> add dsh-quote-annotate-pro
-
-# 或直接从 GitHub 安装
-dsh plugin --profile <profile> add github:zhao-guang-ai/dsh-quote-annotate-pro
-
-# 本地开发：
-#   <本仓库绝对路径> 为克隆后的目录；link 安装后改文件即刻热更，无需重启
-dsh plugin --profile <profile> add <本仓库绝对路径>
-```
-
-装好后 profile 的 `package.json` 会出现：
-
-```
-"dsh-quote-annotate-pro": "link:<本仓库绝对路径>"
-```
 
 ## 工作原理
 

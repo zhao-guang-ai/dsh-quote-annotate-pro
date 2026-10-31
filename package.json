@@ -1,7 +1,7 @@
 {
   "name": "dsh-quote-annotate-pro",
   "version": "0.4.3",
-  "description": "划词批注与引用锚点：对话里划词批注（多轮按从上到下编号），文档预览里也能批注（docx/PDF/Markdown/代码按原文划词，xlsx/csv 按单元格选区地址；位置行带文件路径/行/页/选区，先攒后一次性发送）；引用块在输入框和已发送消息里始终可见，点一下跳回原文并高亮。纯客户端，锚点与批注存本地 localStorage。",
+  "description": "DSH 会话与文档预览里的划词批注：带编号的引用块在输入框和已发送消息里始终可见、点一下跳回原文；docx/PDF/Markdown/代码与 Excel 选区批注可攒起来一次性发送；批注框支持语音输入。",
   "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "quote", "annotate", "selection", "reference", "anchor"],
   "license": "MIT",
   "type": "module",
@@ -13,7 +13,7 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
-  "files": ["lib", "tools", "cordis.patch.yml", "README.md", "SUMMARY.md", "CHANGELOG.md", "LICENSE"],
+  "files": ["lib", "tools", "docs", "cordis.patch.yml", "README.md", "README.en.md", "SUMMARY.md", "CHANGELOG.md", "LICENSE"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zhao-guang-ai/dsh-quote-annotate-pro.git"
