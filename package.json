@@ -11,9 +11,11 @@
       "default": "./lib/index.js"
     },
     "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./docs/images/icon-180.png",
     "./package.json": "./package.json"
   },
-  "files": ["lib", "tools", "docs", "cordis.patch.yml", "README.md", "README.en.md", "SUMMARY.md", "CHANGELOG.md", "LICENSE"],
+  "files": ["lib", "tools", "docs", "locale", "cordis.patch.yml", "README.md", "README.en.md", "SUMMARY.md", "CHANGELOG.md", "LICENSE"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zhao-guang-ai/dsh-quote-annotate-pro.git"
