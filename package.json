@@ -1,6 +1,6 @@
 {
   "name": "dsh-quote-annotate-pro",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "DSH 会话与文档预览里的划词批注：带编号的引用块在输入框和已发送消息里始终可见、点一下跳回原文；docx/PDF/Markdown/代码与 Excel 选区批注可攒起来一次性发送；批注框支持语音输入。",
   "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "quote", "annotate", "selection", "reference", "anchor"],
   "license": "MIT",

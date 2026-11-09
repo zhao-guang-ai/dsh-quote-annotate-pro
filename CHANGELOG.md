@@ -2,6 +2,20 @@
 
 本项目的所有重要变更都记在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## 0.4.4 — 底部批注浮条不再挡住 Excel 的 sheet 标签栏
+
+Excel 预览把 sheet 标签栏画在视口最底部；原来「批注 · N」浮条只离下沿 12px，多 sheet 时会把标签栏盖住。
+本版把浮条的底部留白从 12px 提到 44px（`DOC_BAR_HEIGHT = 40` + `DOC_BAR_BOTTOM_GAP = 44`），
+docx / PDF / Markdown / 代码预览统一抬高同样的距离，展开的列表也跟着上移。
+
+- 修掉「Excel 多 sheet 时浮条压住底部 sheet 标签、切不了 sheet」的问题（实测：旧参数浮条底边压住标签栏 22px，
+  新参数留出 10px 净空）；
+- 纯几何调整，没有数据格式变化：已存的批注、位置行格式、跳回链路都不变；
+- 感谢 @DoggyHU：同款修法先出现在其 fork 的 0.3.12（`fix: 底部批注浮条上移 32px`），本次以相同常量上游化。
+
+验证：`node --check`、清单自检、`npm test` 56/56；另用 Edge headless 搭了「Excel 预览 + sheet 标签栏 + 浮条」的对照页，
+按真实公式取 `barTop`，量得旧参数 `overlap = 22px`、新参数 `overlap = 0`（净空 10px）。
+
 ## 0.4.3 — 批注框里也能语音输入（麦克风）+ Excel / 文档预览批注更稳
 
 新版 DSH 的输入框带了「语音输入」。本版把这个麦克风搬进批注框 —— 说一段话就能写批注，不用切输入法。
