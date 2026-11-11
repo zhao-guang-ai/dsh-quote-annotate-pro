@@ -2,6 +2,25 @@
 
 本项目的所有重要变更都记在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## 0.5.0 — 跟随 DSH 语言设置：界面与协议中英双语
+
+界面文案和发给模型的协议行现在跟着 DSH 的语言走：中文环境保持现在的中文，其他语言自动切英文；
+宿主没有 locale 服务时仍用中文，不会因为缺服务变成空文案。感谢 @pranas 的 PR #5。
+
+- **界面双语**：选区气泡、批注编辑器（占位符 / 按钮 / 提示 / 状态）、文件批注列表（`批注 · N` → `Notes · N`、
+  展开 / 收起 / Send all / Delete all、编辑 / 删除 / 保存 / 取消）、语音全部提示与 aria-label、✕ 取消、通知与 tooltip 全部中英切换；
+- **协议双语**：位置行支持 `【Annotation 1 · Turn 5 · DSH reply】`、`【Quote · Turn 3 · Your message】`，
+  评语行支持 `Comment: …`，逐条回复指令切到 `(Reply to each annotation using "Annotation 1:", "Annotation 2:", etc.)`；
+- **兼容旧数据**：中文与英文两种格式并行识别，混排草稿也能拆块；重编号时保留每条既有位置行的语言；
+  不改用户原文、文件名、sheet 名与 `localStorage` key，无数据迁移；
+- **Plugin Manager 元数据**：新增 `locale/en.json` / `locale/zh.json`（`meta.title` / `meta.description`），
+  并通过 `./icon` 导出插件图标（宿主读的是插件包内的 locale 资源与 icon 子路径，已按 DSH 的 `readPluginMeta` 规则核对）；
+- **已知限制**：已经创建出来的 DOM 标签（发送后消息里的引用块）和已经打开的编辑器标题保留创建时语言，
+  切换语言后新出现的 UI 立即生效 —— 这与宿主自身的行为一致。
+
+验证：`node --check lib/client.js`、`node --check lib/index.js`、`tools/check-manifest.mjs`、`npm test` **66/66**
+（原 56 条全部保持，新增 10 条中英往返 / 订阅 / 双语协议 / mixed 草稿用例）。
+
 ## 0.4.4 — 底部批注浮条不再挡住 Excel 的 sheet 标签栏
 
 Excel 预览把 sheet 标签栏画在视口最底部；原来「批注 · N」浮条只离下沿 12px，多 sheet 时会把标签栏盖住。

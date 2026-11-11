@@ -16,6 +16,7 @@ Whether you select text in a chat message or in a document preview in the right 
 - **Annotate document previews**: select text in docx / PDF / Markdown / code previews → notes collect in a **file notes list** → the `批注 · N` bar at the bottom sends them all in one go; each block carries the file and line/page and reopens the source where it came from.
 - **Annotate Excel ranges**: cells are painted on a canvas, so there is no selectable text — notes are located by the formula bar's **range address** (`Sheet1!B2:D7`, whole row `3:5`, whole column `B:D`), for 13 spreadsheet formats (`xlsx / xlsm / xlsb / ods / numbers / csv / tsv` …).
 - **Dictate notes**: the microphone at the right of the annotation input records once, transcribes through the host's voice-input plugin, and inserts the text at the caret.
+- **Bilingual UI and protocol**: interface text and the annotation headers sent to the model follow the DSH language setting (Chinese in Chinese locales, English elsewhere).
 - **Client-only and offline**: anchors and notes live in your local `localStorage` — no network requests; dark theme follows the host.
 
 | | |
