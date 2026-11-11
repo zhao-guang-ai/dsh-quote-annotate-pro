@@ -661,3 +661,266 @@ test('位置行边界：路径含「】」、sheet 名读不到、非 Excel 文�
   assert.equal(stripExcelSourceSuffix('D:\\ws\\预算.xlsx:Sheet1!A1'), 'D:\\ws\\预算.xlsx')
   assert.equal(stripExcelSourceSuffix('D:\\ws\\预算.xlsx:B:D'), 'D:\\ws\\预算.xlsx')
 })
+
+// ---------- English localization: fake optional locale service, no preference changes ----------
+
+const EN_REPLY_INSTRUCTION = ' (Reply to each annotation using "Annotation 1:", "Annotation 2:", etc.)'
+
+function bindTestLocale(locale) {
+  const log = console.log
+  console.log = () => {} // Binding a locale without slots is expected; omit apply diagnostics.
+  try {
+    api.apply({ get: (name) => name === 'locale' ? locale : undefined })
+  } finally {
+    console.log = log
+  }
+}
+
+function withTestLocale(active, run) {
+  const locale = { getLocale: () => ({ active }), subscribe: () => () => {} }
+  bindTestLocale(locale)
+  try {
+    return run(locale)
+  } finally {
+    bindTestLocale(undefined)
+  }
+}
+
+test('locale: absent optional service preserves Chinese; host locales choose translated text', () => {
+  assert.equal(api.__test.localeId(), 'zh-CN')
+  assert.equal(api.__test.tr('中文', 'English'), '中文')
+  const unsubscribe = api.__test.subscribeLocale(() => assert.fail('No service should emit a change'))
+  assert.equal(typeof unsubscribe, 'function')
+  unsubscribe()
+  for (const active of ['zh', 'zh-CN', 'zh-TW', 'zh-Hant-CN', 'ZH-cn']) {
+    withTestLocale(active, () => {
+      assert.equal(api.__test.localeId(), active)
+      assert.equal(api.__test.tr('中文', 'English'), '中文', active)
+    })
+  }
+  for (const active of ['en', 'en-US', 'en-GB', 'fr-FR']) {
+    withTestLocale(active, () => {
+      assert.equal(api.__test.localeId(), active)
+      assert.equal(api.__test.tr('中文', 'English'), 'English', active)
+    })
+  }
+  assert.equal(api.__test.localeId(), 'zh-CN')
+})
+
+test('locale: subscription delegates to the host and observes a language switch', () => {
+  let active = 'zh-CN'
+  let listener = null
+  let unsubscribed = false
+  let changes = 0
+  const locale = {
+    getLocale: () => ({ active }),
+    subscribe(fn) {
+      listener = fn
+      return () => { unsubscribed = true; listener = null }
+    },
+  }
+  bindTestLocale(locale)
+  let unsubscribe
+  try {
+    const onChange = () => { changes += 1 }
+    unsubscribe = api.__test.subscribeLocale(onChange)
+    assert.equal(listener, onChange)
+    assert.equal(api.__test.tr('批注', 'Annotate'), '批注')
+    active = 'en-US'
+    listener()
+    assert.equal(changes, 1)
+    assert.equal(api.__test.localeId(), 'en-US')
+    assert.equal(api.__test.tr('批注', 'Annotate'), 'Annotate')
+  } finally {
+    if (unsubscribe) unsubscribe()
+    bindTestLocale(undefined)
+  }
+  assert.equal(unsubscribed, true)
+  assert.equal(listener, null)
+  assert.equal(api.__test.tr('批注', 'Annotate'), '批注')
+})
+
+test('English chat: generated header, comment and reply instruction round-trip without translating content', () => {
+  withTestLocale('en-US', () => {
+    const quote = 'Quoted 用户 text\n\nSecond paragraph — naïve 🙂'
+    const comment = 'Please keep 批注 and 文件 literally'
+    const raw = renderAnnotationBlock({ turn: 34, kind: 'assistant-step', quote, comment }, 1, { instruction: true })
+    assert.equal(raw, '【Annotation 1 · Turn 35 · DSH reply' + EN_REPLY_INSTRUCTION + '】\n' + quote + '\n\nComment: ' + comment)
+    const parsed = parseQuoteBlock(raw)
+    assert.equal(parsed.no, 1)
+    assert.equal(parsed.quote, quote)
+    assert.equal(parsed.comment, comment)
+    assert.equal(snippetOf(raw), quote.replace(/\s+/g, ' ').trim())
+    assert.equal(nextAnnotationNo(raw), 2)
+    assert.equal(annotationNoOf(parsed.header), 1)
+    assert.equal(roleText('user'), 'Your message')
+    assert.equal(roleText('tool-call'), 'Tool call')
+    assert.equal(anchorLabelOf({ turn: 0, role: 'user' }), 'Turn 1 · Your message')
+    assert.equal(buildQuoteHeader({ turn: 0, role: 'user' }), '【Quote · Turn 1 · Your message】')
+    assert.equal(buildQuoteHeader({}), '')
+    assert.equal(noteWhereLabel({ page: 3 }), 'Page 3')
+    assert.equal(noteWhereLabel({ line: 12 }), 'Line 12')
+    assert.equal(noteWhereLabel({ page: 3, excel: { ref: 'A1' } }), '')
+  })
+})
+
+test('Bilingual parsing: Chinese and English sent blocks work independently of the active locale', () => {
+  const fixtures = [
+    ['【批注 4 · 第2轮 · 你的消息（请按「Annotation 1：」「Annotation 2：」…逐条回应）】\n中文 quote\n\n批注：Keep 原文', 4, '中文 quote', 'Keep 原文'],
+    ['【Annotation 7 · Turn 3 · DSH reply' + EN_REPLY_INSTRUCTION + '】\nEnglish 原文\n\nComment: 用户 comment', 7, 'English 原文', '用户 comment'],
+    ['【引用 · 第1轮 · 你的消息】\nLegacy 中文 quote\n\n批注:旧评语', null, 'Legacy 中文 quote', '旧评语'],
+    ['【Quote · Turn 1 · Your message】\nLegacy English quote\n\nComment:legacy comment', null, 'Legacy English quote', 'legacy comment'],
+  ]
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      for (const [raw, no, quote, comment] of fixtures) {
+        const parsed = parseQuoteBlock(raw)
+        assert.ok(parsed, active + ': ' + raw)
+        assert.equal(parsed.no, no)
+        assert.equal(parsed.quote, quote)
+        assert.equal(parsed.comment, comment)
+        assert.equal(annotationNoOf(parsed.header), no)
+        assert.equal(draftHasAnnotation(raw, { quote }), true)
+      }
+    })
+  }
+})
+
+test('Mixed-language drafts: renumbering preserves header languages and is idempotent after a locale switch', () => {
+  const chinese = '【批注 8 · 第2轮 · 你的消息（请按「Annotation 1：」「Annotation 2：」…逐条回应）】\n中文原文\n\n批注：中文评语'
+  const english = '【Annotation 12 · Turn 4 · DSH reply' + EN_REPLY_INSTRUCTION + '】\nEnglish quote\n\nComment: English comment'
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      for (const blocks of [[chinese, english], [english, chinese]]) {
+        const raw = 'User introduction 用户\n\n' + blocks.join('\n\n') + '\n\nUser ending 用户'
+        assert.equal(nextAnnotationNo(raw), 13)
+        const once = renumberAnnotationsInDraft(raw)
+        assert.equal(renumberAnnotationsInDraft(once), once)
+        assert.ok(once.startsWith('User introduction 用户\n\n'))
+        assert.ok(once.endsWith('\n\nUser ending 用户'))
+        assert.equal((once.match(/请按「Annotation|Reply to each annotation using/g) || []).length, 1)
+        if (blocks[0] === chinese) {
+          assert.ok(once.includes('【批注 1 · 第2轮 · 你的消息（请按「Annotation'))
+          assert.ok(once.includes('【Annotation 2 · Turn 4 · DSH reply】'))
+        } else {
+          assert.ok(once.includes('【Annotation 1 · Turn 4 · DSH reply' + EN_REPLY_INSTRUCTION + '】'))
+          assert.ok(once.includes('【批注 2 · 第2轮 · 你的消息】'))
+        }
+        assert.equal(nextAnnotationNo(once), 3)
+        assert.equal(stripQuoteBlocks(once), 'User introduction 用户\n\nUser ending 用户')
+        const removedEnglish = removeBlockFromDraft(once, 'English quote', 'English comment')
+        assert.equal(removedEnglish.includes('English quote'), false)
+        assert.equal(removedEnglish.includes('Comment: English comment'), false)
+        assert.ok(removedEnglish.includes('中文原文\n\n批注：中文评语'))
+        assert.ok(removedEnglish.startsWith('User introduction 用户'))
+        assert.ok(removedEnglish.endsWith('User ending 用户'))
+        const removedChinese = removeBlockFromDraft(once, '中文原文', '中文评语')
+        assert.equal(removedChinese.includes('中文原文'), false)
+        assert.ok(removedChinese.includes('English quote\n\nComment: English comment'))
+      }
+    })
+  }
+})
+
+test('English drafts: missing annotation numbers repair to the normal header format', () => {
+  withTestLocale('en-US', () => {
+    const missing = '【Annotation · Turn 2 · Your message】\nQuote\n\nComment: Keep me'
+    const repaired = renumberAnnotationsInDraft(missing)
+    assert.ok(repaired.startsWith('【Annotation 1 · Turn 2 · Your message' + EN_REPLY_INSTRUCTION + '】'))
+    assert.equal(renumberAnnotationsInDraft(repaired), repaired)
+  })
+})
+
+test('English drafts: orphan comments remove and commentless quotes preserve following prose', () => {
+  withTestLocale('en-US', () => {
+    assert.equal(removeBlockFromDraft('Comment: orphan 用户\nKeep me 原文', 'Missing quote', 'orphan 用户'), 'Keep me 原文')
+    assert.equal(removeBlockFromDraft('Comment:orphan 用户\nKeep me 原文', 'Missing quote', 'orphan 用户'), 'Keep me 原文')
+    const quote = 'First 用户 paragraph\n\nSecond 原文 paragraph'
+    const ownText = 'This is my own 用户 sentence, not part of the quote.'
+    const raw = renderAnnotationBlock({ turn: 0, role: 'user', quote }, 1) + '\n\n' + ownText
+    assert.equal(stripQuoteBlocks(raw, [quote]), ownText)
+    assert.equal(removeBlockFromDraft(ownText, 'Missing quote', ''), ownText)
+    assert.equal(looksLikeQuoteFragment('Annotation 1 · Turn 2'), true)
+    assert.equal(looksLikeQuoteFragment('Turn 3 · DSH reply'), true)
+    assert.equal(looksLikeQuoteFragment('Turn 3 is incorrect'), false)
+    assert.equal(looksLikeQuoteFragment('My Annotation 1 needs review'), false)
+  })
+})
+
+test('Bilingual document headers: Unicode, ordinary parentheses, closing delimiters and source locations round-trip', () => {
+  const path = 'notes/批注实验（预算） (draft)】2026.md'
+  const quote = 'Quoted 用户 text\n\nSecond paragraph'
+  const comment = 'Keep 用户 words and (ordinary parentheses)'
+  const headers = []
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      const raw = buildDocNotesBatch([{ quote, comment, line: 133 }], { path })
+      const header = raw.split('\n')[0]
+      headers.push(header)
+      assert.deepEqual(parseDocSourceHeader(header), { path, line: 133, page: null })
+      assert.equal(docFileNameOfHeader(header), '批注实验（预算） (draft)】2026.md')
+      const parsed = parseQuoteBlock(raw)
+      assert.equal(parsed.header, header)
+      assert.equal(parsed.quote, quote)
+      assert.equal(parsed.comment, comment)
+      if (active === 'en-US') {
+        assert.equal(header, '【Annotation 1 · File · ' + path + ':L133' + EN_REPLY_INSTRUCTION + '】')
+        assert.ok(raw.endsWith('\n\nComment: ' + comment))
+        const later = buildDocNotesBatch([{ quote, comment, page: 4 }], { path, startNo: 3 })
+        assert.ok(later.startsWith('【Annotation 3 · File · ' + path + ':p4】'))
+        assert.equal(later.includes('Reply to each annotation using'), false)
+      }
+    })
+  }
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      for (const header of headers) {
+        assert.deepEqual(parseDocSourceHeader(header), { path, line: 133, page: null })
+        assert.equal(docFileNameOfHeader(header), '批注实验（预算） (draft)】2026.md')
+      }
+    })
+  }
+})
+
+test('English Excel headers: ranges, rows, columns and quoted sheet names retain the original Unicode path', () => {
+  withTestLocale('en-US', () => {
+    const path = 'D:\\审阅 (draft)\\预算】2026.xlsx'
+    for (const [sheet, ref, kind] of [
+      ['Sheet1', 'A1:C3', 'range'],
+      ['2024 预算', 'B2', 'cell'],
+      ["It's", '3:5', 'row'],
+      ['Q1!', 'B:D', 'col'],
+      ['', 'A1', 'cell'],
+    ]) {
+      const address = excelLocationOf(sheet, ref)
+      const raw = buildDocNotesBatch([{ quote: address, comment: 'Keep 原文', excel: { sheet, ref, kind } }], { path })
+      const header = raw.split('\n')[0]
+      assert.equal(header, '【Annotation 1 · File · ' + path + ':' + address + EN_REPLY_INSTRUCTION + '】')
+      assert.deepEqual(parseDocSourceHeader(header), { path, line: null, page: null })
+      assert.equal(docFileNameOfHeader(header), '预算】2026.xlsx')
+      assert.equal(parseQuoteBlock(raw).header, header)
+      assert.equal(parseQuoteBlock(raw).quote, address)
+      assert.equal(parseQuoteBlock(raw).comment, 'Keep 原文')
+      assert.equal(docNotesStorageKey('en-session', path), 'en-session|' + path)
+    }
+    assert.equal(stripExcelSourceSuffix('D:\\ws\\用户 (draft).txt:2024'), 'D:\\ws\\用户 (draft).txt:2024')
+  })
+})
+
+test('Display resources: both locales and the existing icon are exported and packaged', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(pkg.exports['./client'], './lib/client.js')
+  assert.equal(pkg.exports['./locale/*.json'], './locale/*.json')
+  assert.equal(pkg.exports['./icon'], './docs/images/icon-180.png')
+  assert.ok(pkg.files.includes('locale'))
+  assert.ok(pkg.files.includes('docs'))
+  for (const language of ['en', 'zh']) {
+    const dict = JSON.parse(readFileSync(new URL('../locale/' + language + '.json', import.meta.url), 'utf8'))
+    assert.deepEqual(Object.keys(dict.meta).sort(), ['description', 'title'])
+    assert.ok(dict.meta.title.trim())
+    assert.ok(dict.meta.description.trim())
+  }
+  const icon = readFileSync(new URL('../docs/images/icon-180.png', import.meta.url))
+  assert.deepEqual([...icon.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+  assert.ok(icon.length <= 256 * 1024)
+})
