@@ -1,10 +1,11 @@
-// 客户端 bundle 的纯函数自检（不依赖浏览器 DOM / 网络）
+// 客户端 bundle 自检（纯函数 + composer 事件；不依赖浏览器 / 网络）
 // 运行：npm test   （node tools/test-client.mjs）
 //
 // 做法：给 client.js 提供最小化的 window/document/localStorage/fetch 桩，
 // 捕获 window.__ModuleLoader__.load(...) 注册的工厂，再调用工厂拿到 exports，
 // 然后断言 exports.__test 里的纯函数。这些函数是消息解析与编号的核心，回归风险最高。
 import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -56,7 +57,7 @@ assert.ok(captured, 'client.js 应调用 window.__ModuleLoader__.load(...)')
 assert.equal(captured.id, 'dsh-quote-annotate-pro')
 const api = captured.factory((name) => (name === 'react' ? {} : {}))
 const { buildQuoteHeader, nextAnnotationNo, annotationNoOf, parseQuoteBlock, snippetOf, anchorLabelOf, roleText,
-  stripQuoteBlocks, renderAnnotationBlock, renderAnnotationSection, sortAnnotations, draftHasAnnotation,
+  stripQuoteBlocks, renderAnnotationBlock, renderAnnotationSection, sortAnnotations, draftHasAnnotation, reconcileDraftAnnotations,
   looksLikeQuoteFragment, removeBlockFromDraft, renumberAnnotationsInDraft,
   docSourceLabel, pathOfFileAddress, fileNameOfPath, pathRelativeTo, docSourceOf, docProbes, buildDocNotesBatch,
   docFileNameOfHeader, parseDocSourceHeader, fileResourceAddress, docNotesStore, docNotesStorageKey, noteWhereLabel,
@@ -130,6 +131,7 @@ test('parseQuoteBlock：正文遇到下一个位置行即结束', () => {
   const r = parseQuoteBlock(raw)
   assert.ok(r)
   assert.equal(r.quote, '原文A')
+  assert.equal(r.comment, '') // 下一块的评语不能归到这一块，即使旧草稿没有空评语行。
   assert.equal(r.rest.indexOf('【批注 2'), 0)
 })
 
@@ -159,8 +161,8 @@ test('renderAnnotationBlock：位置行 + 原文 + 批注；首条带回复格�
   assert.equal(renderAnnotationBlock(e, 2), '【批注 2 · 第2轮 · DSH 回复】\n原文A\n\n批注：不太对')
   const withIns = renderAnnotationBlock(e, 1, { instruction: true })
   assert.match(withIns, /^【批注 1 · 第2轮 · DSH 回复（请按「Annotation 1：」/)
-  // 没有评语时不留空的「批注：」行；没有位置信息时只剩编号
-  assert.equal(renderAnnotationBlock({ quote: 'Q' }, 3), '【批注 3】\nQ')
+  // 空评语仍保留边界，插入后可继续写评语；没有位置信息时只剩编号
+  assert.equal(renderAnnotationBlock({ quote: 'Q' }, 3), '【批注 3】\nQ\n\n批注：')
 })
 
 test('renderAnnotationSection：重编号 1..N，只有首条带指令', () => {
@@ -169,8 +171,9 @@ test('renderAnnotationSection：重编号 1..N，只有首条带指令', () => {
     { turn: 0, kind: 'user', quote: 'A', comment: 'a' },
     { turn: 2, kind: 'assistant-step', quote: 'B', comment: '' },
   ])
-  const blocks = out.split('\n\n【批注')
+  const blocks = out.split('\n【批注')
   assert.equal(blocks.length, 2)
+  assert.equal(out.includes('\n\n【批注'), false)
   assert.match(out, /^【批注 1 · 第1轮 · 你的消息/)
   assert.ok(out.includes('【批注 2 · 第3轮 · DSH 回复】\nB'))
   assert.equal((out.match(/请按「Annotation/g) || []).length, 1)
@@ -457,7 +460,7 @@ test('buildDocNotesBatch：一次性发送的文本格式（编号 / 路径 / �
   ], { path })
   const expected = '【批注 1 · 文件 · ' + path + ':p2（请按「Annotation 1：」「Annotation 2：」…格式逐条回应我的批注）】'
     + '\n第一段原文\n\n批注：这条不对'
-    + '\n\n【批注 2 · 文件 · ' + path + ':L12】\n第二段原文'
+    + '\n\n【批注 2 · 文件 · ' + path + ':L12】\n第二段原文\n\n批注：'
   assert.equal(text, expected)
   // 只处理有原文的条目；空列表返回空串
   assert.equal(buildDocNotesBatch([{ quote: '   ', comment: 'x' }], { path }), '')
@@ -905,6 +908,651 @@ test('English Excel headers: ranges, rows, columns and quoted sheet names retain
     }
     assert.equal(stripExcelSourceSuffix('D:\\ws\\用户 (draft).txt:2024'), 'D:\\ws\\用户 (draft).txt:2024')
   })
+})
+
+test('空评语：聊天和文件批注都保留可继续输入的评语行', () => {
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      const prefix = active === 'zh-CN' ? '批注：' : 'Comment: '
+      for (const comment of [undefined, '', ' \t ']) {
+        const entry = { turn: 0, kind: 'assistant-step', quote: '原文 Quote', comment }
+        const chat = renderAnnotationBlock(entry, 1)
+        const doc = buildDocNotesBatch([entry], { path: 'notes/review.md' })
+        for (const raw of [chat, doc]) {
+          assert.ok(raw.endsWith('\n\n' + prefix), raw)
+          assert.equal(parseQuoteBlock(raw).quote, entry.quote)
+          assert.equal(parseQuoteBlock(raw).comment, '')
+          // 直接在评语行末尾输入，不需要重新打开批注浮框。
+          assert.equal(parseQuoteBlock(raw + '稍后补写 Comment added later').comment, '稍后补写 Comment added later')
+        }
+      }
+    })
+  }
+})
+
+test('空评语：后续普通段落不属于原文或评语，取消批注也不丢字', () => {
+  const quote = '第一段 Quote\n\n第二段 Quote'
+  const followUp = '这是我的问题 My follow-up question'
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      const entry = { turn: 0, kind: 'assistant-step', quote, comment: '' }
+      const chat = renderAnnotationBlock(entry, 1)
+      const doc = buildDocNotesBatch([entry], { path: 'notes/review.md' })
+      for (const block of [chat, doc]) {
+        // 同时覆盖宿主清掉行尾空格后的草稿。
+        for (const raw of [block, block.trimEnd()]) {
+          const draft = raw + '\n\n' + followUp
+          const parsed = parseQuoteBlock(draft)
+          assert.equal(parsed.quote, quote)
+          assert.equal(parsed.comment, '')
+          assert.ok(parsed.rest.endsWith(followUp))
+          assert.equal(snippetOf(raw), quote.replace(/\s+/g, ' '))
+          assert.equal(stripQuoteBlocks(draft), followUp)
+          assert.equal(removeBlockFromDraft(draft, quote, ''), followUp)
+        }
+      }
+    })
+  }
+})
+
+test('空评语：下一条批注的位置行不能被读成上一条评语', () => {
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      const entries = [
+        { turn: 0, kind: 'user', quote: '原文 A', comment: '' },
+        { turn: 1, kind: 'assistant-step', quote: '原文 B', comment: '评语 B' },
+      ]
+      const followUp = '保留用户文字 Keep this question'
+      const draft = renderAnnotationSection(entries) + '\n\n' + followUp
+      const first = parseQuoteBlock(draft)
+      assert.equal(first.quote, entries[0].quote)
+      assert.equal(first.comment, '')
+      const secondHeader = first.rest.indexOf('【')
+      assert.ok(secondHeader >= 0)
+      const second = parseQuoteBlock(first.rest.slice(secondHeader))
+      assert.equal(second.quote, entries[1].quote)
+      assert.equal(second.comment, entries[1].comment)
+      assert.equal(stripQuoteBlocks(draft), followUp)
+    })
+  }
+})
+
+test('草稿对账：插入新的聊天或文件批注时保留后来补写、修改或清空的评语', () => {
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      const prefix = active === 'zh-CN' ? '批注：' : 'Comment: '
+      for (const [before, after] of [['', '后来补写 Later comment'], ['Old comment', 'Updated comment'], ['Old comment', '']]) {
+        for (const added of [
+          { turn: 1, kind: 'assistant-step', quote: 'New chat quote', comment: 'New comment' },
+          { filePath: 'notes/review.md', quote: 'New file quote', comment: 'New comment' },
+        ]) {
+          const stored = { anchorKey: 'source-1', turn: 0, kind: 'user', quote: 'First paragraph\n\nSecond paragraph', comment: before }
+          const own = 'Keep my follow-up 用户正文'
+          const draft = renderAnnotationSection([stored]).replace(prefix + before, prefix + after) + own
+          const kept = reconcileDraftAnnotations(draft, [stored])
+          const ordered = sortAnnotations(kept.concat(added))
+          const prose = stripQuoteBlocks(draft, ordered.map((e) => e.quote))
+          const next = [prose, renderAnnotationSection(ordered)].filter((s) => s !== '').join('\n\n')
+          assert.equal(parseQuoteBlock(next).comment, after)
+          assert.deepEqual(kept[0], { ...stored, comment: after })
+          assert.equal(stored.comment, before, '不能直接改写存储快照')
+          assert.ok(next.includes(own))
+          assert.ok(next.includes(added.quote))
+        }
+      }
+    })
+  }
+})
+
+test('草稿对账：重复原文的批注逐一匹配，不串评语', () => {
+  for (const active of ['zh-CN', 'en-US']) {
+    withTestLocale(active, () => {
+      const stored = [
+        { turn: 0, kind: 'user', quote: 'Repeated quote', comment: 'Old first' },
+        { turn: 1, kind: 'user', quote: 'Repeated quote', comment: 'Old second' },
+      ]
+      const draft = renderAnnotationSection([{ ...stored[0], comment: 'Updated first' }, { ...stored[1], comment: '' }])
+      const kept = reconcileDraftAnnotations(draft, stored)
+      assert.deepEqual(kept.map((e) => e.comment), ['Updated first', ''])
+      assert.deepEqual(stored.map((e) => e.comment), ['Old first', 'Old second'])
+    })
+  }
+})
+
+test('草稿对账：旧草稿无法精确拆块时保留元数据，已删除的原文不复活', () => {
+  const legacy = { turn: 0, kind: 'user', quote: 'Legacy quote', comment: 'Saved comment' }
+  const deleted = { turn: 1, kind: 'user', quote: 'Deleted quote', comment: 'Deleted comment' }
+  const draft = '【引用 · 第1轮 · 你的消息】\nLegacy quote\n\nUnmarked legacy prose'
+  assert.deepEqual(reconcileDraftAnnotations(draft, [legacy, deleted]), [legacy])
+})
+
+// 最小编辑器节点桩：运行真实 composer effect 与事件监听器，不模拟 React 或 Lexical。
+function composerNode(tag, ...children) {
+  if (tag === '#text') return { nodeType: 3, nodeValue: children[0], get textContent() { return this.nodeValue } }
+  const classes = new Set()
+  const attrs = new Map()
+  const node = {
+    ...fakeElement(), nodeType: 1, tagName: tag, nodeName: tag, childNodes: children, isConnected: true,
+    get children() { return this.childNodes.filter((n) => n.nodeType === 1) },
+    get textContent() { return this.childNodes.map((n) => n.textContent).join('') },
+    get lastChild() { return this.childNodes.at(-1) || null },
+    classList: {
+      add: (...names) => names.forEach((n) => classes.add(n)),
+      remove: (...names) => names.forEach((n) => classes.delete(n)),
+      contains: (name) => classes.has(name),
+      toggle: (name, on) => on ? classes.add(name) : classes.delete(name),
+    },
+    setAttribute: (name, value) => attrs.set(name, value),
+    getAttribute: (name) => attrs.get(name) || null,
+    removeAttribute: (name) => attrs.delete(name),
+    contains(other) { return other === this || this.childNodes.some((n) => n === other || (n.contains && n.contains(other))) },
+    closest(selector) {
+      if (selector === '[contenteditable="true"]' && this.tagName === 'DIV') return this
+      return this.parentElement ? this.parentElement.closest(selector) : null
+    },
+  }
+  children.forEach((child, i) => {
+    child.parentNode = child.parentElement = node
+    child.previousSibling = children[i - 1] || null
+  })
+  return node
+}
+
+function withComposerLines(lines, run, services = {}) {
+  const root = composerNode('DIV', ...lines)
+  const saved = { querySelectorAll: document.querySelectorAll, activeElement: document.activeElement,
+    addEventListener: document.addEventListener, removeEventListener: document.removeEventListener,
+    getSelection: window.getSelection, log: console.log, setTimeout: globalThis.setTimeout }
+  const timers = new Set()
+  globalThis.setTimeout = (...args) => { const timer = saved.setTimeout(...args); timers.add(timer); return timer }
+  const events = new Map()
+  const effects = new Map()
+  let range = null
+  let dispose
+  document.querySelectorAll = (selector) => selector === '[contenteditable="true"]' ? [root] : []
+  document.activeElement = root
+  document.addEventListener = (name, fn) => events.set(name, fn)
+  document.removeEventListener = () => {}
+  window.getSelection = () => range ? { rangeCount: 1, anchorNode: range.startContainer, getRangeAt: () => range } : null
+  console.log = () => {}
+  try {
+    const slots = { register() {}, inject() {} }
+    api.apply({ slots, get: (name) => name === 'slots' ? slots : services[name], effect: (fn, name) => effects.set(name, fn) })
+    dispose = effects.get('dsh-quote-annotate-pro: composer quote decoration')()
+    run({ root, events, press(node, offset, key = 'Backspace', beforeInput = false, endNode = node, endOffset = offset) {
+      range = { startContainer: node, endContainer: endNode, startOffset: offset, endOffset,
+        collapsed: node === endNode && offset === endOffset }
+      let prevented = false
+      events.get(beforeInput ? 'beforeinput' : 'keydown')({
+        target: root, key, inputType: key === 'Backspace' ? 'deleteContentBackward' : 'deleteContentForward',
+        preventDefault() { prevented = true }, stopPropagation() {},
+      })
+      return prevented
+    } })
+  } finally {
+    if (dispose) dispose()
+    for (const timer of timers) clearTimeout(timer)
+    globalThis.setTimeout = saved.setTimeout
+    document.querySelectorAll = saved.querySelectorAll
+    document.activeElement = saved.activeElement
+    document.addEventListener = saved.addEventListener
+    document.removeEventListener = saved.removeEventListener
+    window.getSelection = saved.getSelection
+    console.log = saved.log
+    bindTestLocale(undefined)
+  }
+}
+
+const composerTextLine = (text) => composerNode('P', composerNode('#text', text))
+
+test('输入框：插入后有独立可编辑的空段落，不必在批注里回车才能继续写', () => {
+  for (const comment of ['', '已有评语']) {
+    const draft = renderAnnotationSection([{ turn: 0, kind: 'user', quote: '原文', comment }])
+    assert.match(draft, /[^\n]\n$/, '插入内容必须恰好留一个普通空段落')
+    withComposerLines(draft.split('\n').map(composerTextLine), ({ root, press }) => {
+      const tail = root.lastChild
+      assert.equal(tail.textContent, '')
+      assert.equal(tail.classList.contains('dshq-cmp-quote'), false)
+      assert.equal(tail.classList.contains('dshq-cmp-comment'), false)
+      assert.equal(press(tail.childNodes[0], 0, 'x'), false)
+    })
+  }
+})
+
+function cancelComposerDraft(draft, item) {
+  let next
+  const input = { state: { getSnapshot: () => ({ draft }) }, setDraft: (value) => { next = value } }
+  const services = {
+    conversation: { input: { for: () => input } },
+    sessions: { binding: () => ({ ctx: {} }) },
+    sidebarRight: { mounted: { getSnapshot: () => 'composer-lifecycle-test' } },
+  }
+  withComposerLines(draft.split('\n').map(composerTextLine), () => {
+    api.__test.cancelAnnotationBlock({ ...item, left: 0, top: 0 })
+  }, services)
+  assert.equal(typeof next, 'string', '必须实际运行取消按钮的草稿写入路径')
+  return next
+}
+
+test('输入框生命周期：连续加入批注时中间没有普通空行，底部始终只有一行', () => {
+  const entries = [
+    { turn: 0, kind: 'user', quote: '原文 A', comment: '' },
+    { turn: 1, kind: 'assistant-step', quote: '原文 B', comment: '评语 B' },
+    { filePath: 'notes/review.md', quote: '文件原文 C\n\n保留原文内部空行', comment: '' },
+  ]
+  for (const active of ['zh-CN', 'en-US']) {
+    for (let count = 1; count <= entries.length; count++) {
+      const draft = withTestLocale(active, () => renderAnnotationSection(entries.slice(0, count)))
+      assert.equal(/\n\n【(?:批注|Annotation)/.test(draft), false, '批注之间不能插入普通空段落')
+      assert.match(draft, /[^\n]\n$/)
+      withComposerLines(draft.split('\n').map(composerTextLine), ({ root }) => {
+        const ordinaryEmpty = root.children.filter((line) => line.textContent === '' && !line.classList.contains('dshq-cmp-quote'))
+        assert.equal(ordinaryEmpty.length, 1, '唯一的普通空段落应在批注区末尾')
+        assert.equal(ordinaryEmpty[0], root.lastChild)
+      })
+    }
+  }
+})
+
+test('输入框生命周期：取消第一、中间、最后一条后仍能在批注外打字', () => {
+  const entries = [
+    { turn: 0, kind: 'user', quote: '原文 A', comment: '' },
+    { turn: 1, kind: 'assistant-step', quote: '原文 B', comment: '评语 B' },
+    { filePath: 'notes/review.md', quote: '文件原文 C', comment: '' },
+  ]
+  for (const active of ['zh-CN', 'en-US']) {
+    const draft = withTestLocale(active, () => renderAnnotationSection(entries))
+    for (const entry of entries) {
+      const next = cancelComposerDraft(draft, entry)
+      assert.equal(next.includes(entry.quote), false)
+      assert.match(next, /[^\n]\n$/, '取消后必须保留恰好一个底部空段落')
+      const numbers = [...next.matchAll(/^【(?:批注|Annotation) (\d+)/gm)].map((m) => Number(m[1]))
+      assert.deepEqual(numbers, [1, 2])
+      withComposerLines(next.split('\n').map(composerTextLine), ({ root, press }) => {
+        const tail = root.lastChild
+        assert.equal(tail.textContent, '')
+        assert.equal(tail.classList.contains('dshq-cmp-quote'), false)
+        assert.equal(tail.classList.contains('dshq-cmp-comment'), false)
+        assert.equal(press(tail.childNodes[0], 0, 'x'), false)
+      })
+    }
+    let remaining = draft
+    for (const entry of entries) remaining = cancelComposerDraft(remaining, entry)
+    assert.equal(remaining, '', '最后一条取消后回到原生空输入框，不残留空段落或协议')
+  }
+})
+
+test('输入框生命周期：取消批注保留用户正文，旧草稿也补回可编辑尾行', () => {
+  const entry = { turn: 0, kind: 'user', quote: '原文 A', comment: '' }
+  const other = { turn: 1, kind: 'assistant-step', quote: '原文 B', comment: '评语 B' }
+  const followUp = '用户自己的后续问题 Keep my text'
+  const draft = renderAnnotationSection([entry, other]) + followUp
+  const next = cancelComposerDraft(draft, entry)
+  assert.ok(next.includes(followUp))
+  assert.match(next, /[^\n]\n$/)
+  assert.equal(cancelComposerDraft(next, other), followUp)
+  const legacy = renderAnnotationSection([entry, other]).trimEnd()
+  assert.match(cancelComposerDraft(legacy, entry), /[^\n]\n$/)
+})
+
+test('X 取消：原文与空评语之间有多个空行时不残留 Comment 前缀', () => {
+  const quote = '要取消的原文 Quote to remove'
+  const own = '保留用户正文 Keep this question'
+  for (const active of ['zh-CN', 'en-US']) {
+    const header = withTestLocale(active, () => buildQuoteHeader({ turn: 0, kind: 'user' }, 1))
+    const prefix = active === 'zh-CN' ? '批注：' : 'Comment:'
+    for (const gap of [2, 4, 8]) {
+      const draft = header + '\n' + quote + '\n'.repeat(gap) + prefix + '\n' + own
+      assert.equal(cancelComposerDraft(draft, { quote, comment: '' }), own, active + ': gap=' + gap)
+    }
+  }
+})
+
+test('X 取消：评语被编辑或清空后，旧按钮快照不能留下评语行', () => {
+  const quote = '要取消的原文 Quote to remove'
+  const own = '保留用户正文 Keep this question'
+  for (const active of ['zh-CN', 'en-US']) {
+    const header = withTestLocale(active, () => buildQuoteHeader({ turn: 0, kind: 'user' }, 1))
+    const prefix = active === 'zh-CN' ? '批注：' : 'Comment:'
+    for (const comment of ['', '更新后的评语 Edited comment']) {
+      const draft = header + '\n' + quote + '\n\n' + prefix + comment + '\n' + own
+      assert.equal(cancelComposerDraft(draft, { quote, comment: '旧评语 Stale comment' }), own)
+    }
+  }
+})
+
+test('X 取消：位置行与原文之间有多个空行时也完整移除批注', () => {
+  const quote = '要取消的原文 Quote to remove'
+  const own = '保留用户正文 Keep this question'
+  for (const active of ['zh-CN', 'en-US']) {
+    const header = withTestLocale(active, () => buildQuoteHeader({ turn: 0, kind: 'user' }, 1))
+    const prefix = active === 'zh-CN' ? '批注：' : 'Comment:'
+    const draft = header + '\n'.repeat(8) + quote + '\n\n' + prefix + '\n' + own
+    assert.equal(cancelComposerDraft(draft, { quote, comment: '' }), own)
+  }
+})
+
+test('X 取消：清掉目标评语行时保留下一条批注及其评语', () => {
+  const quote = '要取消的原文 Quote to remove'
+  const other = { turn: 1, kind: 'assistant-step', quote: '保留的原文 Keep this quote', comment: '保留评语 Keep this comment' }
+  const own = '保留用户正文 Keep this question'
+  for (const active of ['zh-CN', 'en-US']) {
+    const header = withTestLocale(active, () => buildQuoteHeader({ turn: 0, kind: 'user' }, 1))
+    const next = withTestLocale(active, () => renderAnnotationBlock(other, 2))
+    const prefix = active === 'zh-CN' ? '批注：' : 'Comment:'
+    for (const marker of [prefix + '\n', '']) {
+      // 目标没有评语行时也不能跨过下一条位置行，误删另一条的评语。
+      const draft = header + '\n' + quote + '\n'.repeat(8) + marker + next + '\n' + own
+      const out = cancelComposerDraft(draft, { quote, comment: '旧评语 Stale comment' })
+      assert.equal(out.includes(quote), false)
+      assert.ok(out.includes(other.quote))
+      assert.ok(out.includes(other.comment))
+      assert.ok(out.includes(own))
+      assert.equal(out.split('\n').filter((line) => /^(?:批注[:：]|Comment:)/.test(line.trim())).length, 1)
+      assert.match(out, /[^\n]\n$/)
+    }
+  }
+})
+
+test('X 取消：没有位置行时不扩大删除范围，保留不匹配的普通 Comment 文字', () => {
+  const quote = '要取消的原文 Quote to remove'
+  const own = 'Comment: 这是普通用户文字，不是旧评语\nKeep my question'
+  const draft = quote + '\n\n' + own
+  assert.equal(cancelComposerDraft(draft, { quote, comment: '旧评语 Stale comment' }), own)
+})
+
+test('输入框：批注内软换行后的退格不能误报为删除评语前缀', () => {
+  for (const prefix of ['批注：', 'Comment:']) {
+    for (const beforeInput of [false, true]) {
+      const continuation = composerNode('#text', '')
+      const comment = composerNode('P', composerNode('#text', prefix), composerNode('BR'), continuation, composerNode('BR'))
+      withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), composerTextLine('原文'), composerTextLine(''), comment], ({ press }) => {
+        assert.equal(press(continuation, 0, 'Backspace', beforeInput), false)
+        assert.equal(press(comment, 2, 'Backspace', beforeInput), false) // 空行光标也可能落在 <p> 的子节点间。
+        assert.equal(press(comment.childNodes[0], prefix.length, 'Backspace', beforeInput), true)
+      })
+    }
+  }
+})
+
+test('输入框：评语后的额外空段落可退格，不能跳过空行误判为结构删除', () => {
+  for (const beforeInput of [false, true]) {
+    const empty = composerTextLine('')
+    withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), composerTextLine('原文'), composerTextLine('Comment: note'), empty, composerTextLine('')], ({ press }) => {
+      assert.equal(press(empty.childNodes[0], 0, 'Backspace', beforeInput), false)
+    })
+    const blank = composerTextLine('')
+    withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), composerTextLine(''), blank], ({ press }) => {
+      assert.equal(press(blank.childNodes[0], 0, 'Backspace', beforeInput), false)
+    })
+  }
+})
+
+test('输入框：删除引用与评语之间的空段落后仍保留批注装饰', () => {
+  for (const prefix of ['批注：', 'Comment:']) {
+    for (const beforeInput of [false, true]) {
+      const quote = composerTextLine('Quoted text')
+      const gap = composerTextLine('')
+      const comment = composerTextLine(prefix + ' editable')
+      withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), quote, gap, comment, composerTextLine('')], ({ root, events, press }) => {
+        assert.equal(quote.classList.contains('dshq-cmp-quote'), true)
+        assert.equal(press(quote.childNodes[0], quote.textContent.length, 'Delete', beforeInput), false)
+        // 模拟原生 Delete 移除空段落，再运行插件实际注册的重装饰回调。
+        root.childNodes.splice(2, 1)
+        root.childNodes.forEach((node, i) => { node.previousSibling = root.childNodes[i - 1] || null })
+        gap.parentNode = gap.parentElement = null
+        events.get('selectionchange')()
+        assert.equal(quote.classList.contains('dshq-cmp-quote'), true)
+        assert.equal(comment.classList.contains('dshq-cmp-comment'), true)
+        assert.equal(comment.classList.contains('dshq-cmp-orphan'), false)
+        assert.equal(press(quote.childNodes[0], quote.textContent.length, 'Delete', beforeInput), true)
+      })
+    }
+  }
+})
+
+test('输入框：选中末尾段落分隔再删除也不能丢掉输入行', () => {
+  for (const prefix of ['批注：', 'Comment:']) {
+    for (const beforeInput of [false, true]) {
+      const comment = composerTextLine(prefix + ' editable')
+      const tail = composerNode('P', composerNode('BR'))
+      withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), composerTextLine('Quote'), composerTextLine(''), comment, tail], ({ press }) => {
+        for (const key of ['Backspace', 'Delete']) {
+          assert.equal(press(comment.childNodes[0], comment.textContent.length, key, beforeInput, tail, 0), true)
+          assert.equal(press(comment.childNodes[0], prefix.length + 1, key, beforeInput, comment.childNodes[0], comment.textContent.length), false)
+        }
+      })
+    }
+  }
+})
+
+test('输入框：末尾输入行不能被 Backspace 或 Delete 并进最后一条批注', () => {
+  for (const prefix of ['批注：', 'Comment:']) {
+    for (const beforeInput of [false, true]) {
+      for (const placeholder of [false, true]) {
+        const comment = composerTextLine(prefix + ' editable')
+        const tail = placeholder ? composerNode('P', composerNode('BR')) : composerTextLine('')
+        withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), composerTextLine('原文'), composerTextLine(''), comment, tail], ({ press }) => {
+          assert.equal(press(tail, 0, 'Backspace', beforeInput), true)
+          assert.equal(press(comment.childNodes[0], comment.textContent.length, 'Delete', beforeInput), true)
+          assert.equal(press(tail, 0, 'x'), false, '保留的尾行仍可打字')
+          assert.equal(press(comment.childNodes[0], comment.textContent.length, 'Backspace', beforeInput), false, '评语正文仍可编辑')
+        })
+      }
+    }
+  }
+})
+
+test('输入框：非尾行的普通正文和额外空行仍可正常退格', () => {
+  for (const beforeInput of [false, true]) {
+    const extra = composerTextLine('')
+    const tail = composerTextLine('')
+    withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), composerTextLine('原文'), composerTextLine('Comment: note'), extra, tail], ({ press }) => {
+      assert.equal(press(tail, 0, 'Backspace', beforeInput), false, '两个空段落可合并为一个')
+    })
+    const own = composerTextLine('My follow-up')
+    const afterOwn = composerTextLine('')
+    withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), composerTextLine('原文'), composerTextLine('Comment: note'), own, afterOwn], ({ press }) => {
+      assert.equal(press(own.childNodes[0], own.textContent.length, 'Backspace', beforeInput), false)
+      assert.equal(press(afterOwn, 0, 'Backspace', beforeInput), false, '普通正文后不需要额外保护空行')
+    })
+    const empty = composerNode('P', composerNode('BR'))
+    withComposerLines([empty], ({ press }) => {
+      assert.equal(press(empty, 0, 'Backspace', beforeInput), false, '无批注时保持原生行为')
+    })
+  }
+})
+
+test('输入框：DOM 拆分文本节点后按整行坐标保护前缀，正常文字仍可删除', () => {
+  const text = composerNode('#text', 'editable')
+  const line = composerNode('P', composerNode('SPAN', composerNode('#text', 'Comment: ')), composerNode('SPAN', text))
+  withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), composerTextLine('原文'), line], ({ press }) => {
+    assert.equal(press(text, 0), false)
+    assert.equal(press(text, 0, 'Backspace', true), false)
+    assert.equal(press(line.childNodes[0].childNodes[0], 8), true)
+  })
+})
+
+test('输入框：Delete 可删软换行，但仍保护带占位 br 的行末结构', () => {
+  for (const beforeInput of [false, true]) {
+    const first = composerNode('#text', 'A')
+    const last = composerNode('#text', 'B')
+    const quote = composerNode('P', first, composerNode('BR'), last, composerNode('BR'))
+    const empty = composerNode('P', composerNode('BR'))
+    withComposerLines([composerTextLine('【Annotation 1 · Turn 1】'), quote, composerTextLine('Comment: note'), empty, composerTextLine('【Annotation 2 · Turn 2】')], ({ press }) => {
+      assert.equal(press(first, 1, 'Delete', beforeInput), false)
+      assert.equal(press(last, 1, 'Delete', beforeInput), true)
+      assert.equal(press(empty, 0, 'Backspace', beforeInput), false)
+      assert.equal(press(empty, 0, 'Delete', beforeInput), true)
+    })
+  }
+})
+
+test('输入框：仍保护位置行以及原文与评语之间的真实结构边界', () => {
+  const header = composerTextLine('【Annotation 1 · Turn 1】')
+  const quote = composerTextLine('原文')
+  const comment = composerTextLine('Comment: note')
+  withComposerLines([header, quote, comment], ({ press }) => {
+    assert.equal(press(header.childNodes[0], 3), true)
+    assert.equal(press(quote.childNodes[0], 0), true)
+    assert.equal(press(quote.childNodes[0], 2, 'Delete'), true)
+    assert.equal(press(comment.childNodes[0], 0), true)
+  })
+})
+
+// Run the real selection listener and toolbar in an isolated minimal DOM.
+function selectionElement(attrs = {}, ...children) {
+  const matches = (node, selector) => selector.split(',').some((part) => {
+    const attr = /^\[([^=\]]+)(?:="([^"]*)")?\]$/.exec(part.trim())
+    return attr && Object.hasOwn(node.attrs, attr[1]) && (attr[2] === undefined || node.attrs[attr[1]] === attr[2])
+  })
+  const node = {
+    nodeType: 1, attrs, children, parentElement: null,
+    getAttribute(name) { return this.attrs[name] ?? null },
+    closest(selector) {
+      for (let el = this; el; el = el.parentElement) if (matches(el, selector)) return el
+      return null
+    },
+    querySelector(selector) {
+      for (const child of this.children) {
+        if (child.nodeType !== 1) continue
+        if (matches(child, selector)) return child
+        const found = child.querySelector(selector)
+        if (found) return found
+      }
+      return null
+    },
+  }
+  for (const child of children) child.parentElement = node
+  return node
+}
+
+function selectionFixture({ previewOpen = true, previewEditable = false, composerEditable = true } = {}) {
+  const textNode = () => ({ nodeType: 3, parentElement: null })
+  const message = textNode()
+  const own = textNode()
+  const quote = textNode()
+  const comment = textNode()
+  const preview = textNode()
+  const row = selectionElement({ 'data-chat-anchor-key': 'reply-1', 'data-chat-turn': '0', 'data-chat-flow-kind': 'assistant-step' }, message)
+  const composer = selectionElement({ 'data-composer-input': 'true', contenteditable: String(composerEditable) },
+    selectionElement({}, own), selectionElement({}, selectionElement({}, quote)), selectionElement({}, comment))
+  const documentRoot = selectionElement({ 'data-textpreview-url': 'dsh-resource://absolute/review.md' },
+    selectionElement(previewEditable ? { contenteditable: 'true' } : {}, preview))
+  const app = selectionElement({}, row, composer, ...(previewOpen ? [documentRoot] : []))
+  const body = selectionElement({}, app)
+  const events = new Map()
+  const effects = new Map()
+  const components = new Map()
+  const frames = new Map()
+  const timers = new Map()
+  let sequence = 0
+  let currentSelection = null
+  let captured
+  const document = {
+    body,
+    addEventListener: (name, fn) => events.set(name, fn),
+    removeEventListener: (name) => events.delete(name),
+  }
+  const window = {
+    __ModuleLoader__: { load: (spec) => { captured = spec } },
+    getSelection: () => currentSelection,
+    addEventListener() {}, removeEventListener() {}, innerWidth: 1280, innerHeight: 800,
+  }
+  runInNewContext(SOURCE, {
+    window, document, console: { log() {} },
+    setTimeout(fn) { const id = ++sequence; timers.set(id, fn); return id },
+    clearTimeout: (id) => timers.delete(id),
+    requestAnimationFrame(fn) { const id = ++sequence; frames.set(id, fn); return id },
+    cancelAnimationFrame: (id) => frames.delete(id),
+  })
+  const React = {
+    useSyncExternalStore() {}, useEffect() {}, useState: () => [0, () => {}],
+    createElement: (type, props, ...children) => ({ type, props, children }),
+  }
+  const api = captured.factory(() => React)
+  const slots = {
+    inject: (_name, register) => register(),
+    register: (options, component) => components.set(options.id, component),
+  }
+  api.apply({
+    get: (name) => name === 'slots' ? slots : undefined,
+    effect: (fn, name) => effects.set(name, fn),
+  })
+  const dispose = effects.get('dsh-quote-annotate-pro: global listeners')()
+  const toolbar = () => components.get('quote-pro-selection-toolbar')({})
+  return {
+    message, own, quote, comment, preview, composer, app, toolbar, dispose,
+    select(start, end = start, commonAncestor = start.parentElement, backward = false) {
+      const range = {
+        startContainer: start, endContainer: end, commonAncestorContainer: commonAncestor,
+        getBoundingClientRect: () => ({ left: 100, top: 100, right: 200, bottom: 120, width: 100, height: 20 }),
+      }
+      currentSelection = {
+        rangeCount: 1, isCollapsed: false, anchorNode: backward ? end : start,
+        toString: () => 'Selected text', getRangeAt: () => range,
+      }
+      events.get('selectionchange')()
+      for (const [id, fn] of frames) { frames.delete(id); fn() }
+      return toolbar()
+    },
+  }
+}
+
+test('chat selections still offer annotations with a preview open or closed', () => {
+  for (const previewOpen of [false, true]) {
+    const f = selectionFixture({ previewOpen })
+    try {
+      assert.equal(f.select(f.message).props.className, 'dshq-toolbar')
+    } finally { f.dispose() }
+  }
+})
+
+test('composer prose, inserted quotes and comments do not offer annotations', () => {
+  for (const previewOpen of [false, true]) {
+    const f = selectionFixture({ previewOpen })
+    try {
+      for (const node of [f.own, f.quote, f.comment]) {
+        assert.equal(f.select(node), null)
+      }
+      assert.equal(f.select(f.own, f.comment, f.composer), null, 'multi-paragraph selection')
+    } finally { f.dispose() }
+  }
+})
+
+test('entering the composer immediately hides the previous chat toolbar', () => {
+  const f = selectionFixture()
+  try {
+    assert.ok(f.select(f.message))
+    assert.equal(f.select(f.own), null, 'do not leave a stale toolbar until the hide timer runs')
+    assert.ok(f.select(f.message), 'chat annotations remain available afterward')
+  } finally { f.dispose() }
+})
+
+test('selections spanning the composer boundary are ignored in either direction', () => {
+  const f = selectionFixture()
+  try {
+    for (const backward of [false, true]) {
+      assert.equal(f.select(f.message, f.own, f.app, backward), null, 'range ends in composer')
+      assert.equal(f.select(f.own, f.preview, f.app, backward), null, 'range starts in composer')
+    }
+  } finally { f.dispose() }
+})
+
+test('the composer marker also excludes selections while the editor is disabled', () => {
+  const f = selectionFixture({ composerEditable: false })
+  try {
+    assert.equal(f.select(f.own), null)
+  } finally { f.dispose() }
+})
+
+test('read-only and editable document previews still offer annotations', () => {
+  for (const previewEditable of [false, true]) {
+    const f = selectionFixture({ previewEditable })
+    try {
+      assert.equal(f.select(f.preview).props.className, 'dshq-toolbar')
+    } finally { f.dispose() }
+  }
 })
 
 test('Display resources: both locales and the existing icon are exported and packaged', () => {
