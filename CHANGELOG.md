@@ -2,6 +2,27 @@
 
 本项目的所有重要变更都记在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## 0.5.1 — 与宿主原生「消息引用」共存：气泡不互相遮挡、引用 chip 不被拍平
+
+DSH 0.2.2-rc.3 起，聊天消息自带原生「引用文本」（消息引用：`QuoteNode` → 发出去是 Markdown blockquote）。
+本版让批注功能和它并存，不改任何数据格式。
+
+- **两个气泡不再重叠**：宿主原生气泡（`[data-text-interaction-surface]`）与我们划词的「批注」气泡都贴在选区上方 8px。
+  现在改用渲染后的真实尺寸定位，并在宿主把它的气泡显示出来之后（60 / 180 / 420ms）重测重摆：
+  一旦相交就依次挪到选区下方 → 原生左侧 → 原生右侧 → 原生上方，并始终 clamp 在视口内；
+- **保住输入框里的引用 chip**：旧实现用纯字符串写草稿，宿主的原生引用 chip 与 `@` 引用 chip 会被拍平成文字。
+  现在按宿主契约写 `{ text, references, quotes }`：从草稿文本里的 `> ` 引用行还原 `quotes`（`offset` / `length` / `text`，
+  与宿主的 `messageQuoteRanges` 同规则），从 `occurrences` 还原 `references`，并按被删区间重映射偏移；
+  找不到的不乱补，chip 数量为 0 时仍走纯字符串（行为与旧版一致）；
+- **发送中不插批注**：输入框处于非 `plain` 阶段（正在发送 / 命令中）时直接提示稍后再试，
+  避免重写草稿顶掉提交（`InputState` 不暴露 `command`，`/命令` chip 无法还原）；
+- **诊断**：新增 `native-probe`、`selection:bubble-shift`、`selection:raw`、`insert:plaintext { chipsKept }` 事件，
+  只在本地诊断端口开启时上报，静默时不影响任何功能。
+
+验证：`node --check lib/client.js`、`node --check lib/index.js`、`tools/check-manifest.mjs` 通过，`npm test` **70/70**
+（新增 4 条：原生引用 + `@` 引用在批注重写后存活且位置正确、只存在于被删块里的引用不复活、
+只有真有 chip 时才传对象否则传字符串、无 DOM 桩时 `nativeSurfaceRect()` 返回 null）；真机确认「引用文本」与「批注」不再重叠。
+
 ## 0.5.0 — 跟随 DSH 语言设置：界面与协议中英双语
 
 界面文案和发给模型的协议行现在跟着 DSH 的语言走：中文环境保持现在的中文，其他语言自动切英文；

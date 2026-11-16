@@ -60,7 +60,8 @@ const { buildQuoteHeader, nextAnnotationNo, annotationNoOf, parseQuoteBlock, sni
   looksLikeQuoteFragment, removeBlockFromDraft, renumberAnnotationsInDraft,
   docSourceLabel, pathOfFileAddress, fileNameOfPath, pathRelativeTo, docSourceOf, docProbes, buildDocNotesBatch,
   docFileNameOfHeader, parseDocSourceHeader, fileResourceAddress, docNotesStore, docNotesStorageKey, noteWhereLabel,
-  normalizeExcelSelection, excelSheetLabel, excelLocationOf, isExcelPath, normalizeExcelMeta, stripExcelSourceSuffix } = api.__test
+  normalizeExcelSelection, excelSheetLabel, excelLocationOf, isExcelPath, normalizeExcelMeta, stripExcelSourceSuffix,
+  carryComposerChips, setDraftKeepingChips, decodeDraftQuote, nativeSurfaceRect } = api.__test
 
 test('roleText / anchorLabelOf：轮次与角色文案', () => {
   assert.equal(roleText('assistant-step'), 'DSH 回复')
@@ -923,4 +924,81 @@ test('Display resources: both locales and the existing icon are exported and pac
   const icon = readFileSync(new URL('../docs/images/icon-180.png', import.meta.url))
   assert.deepEqual([...icon.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
   assert.ok(icon.length <= 256 * 1024)
+})
+
+test('Composer chips: native quote and @reference survive an annotation rewrite', () => {
+  const oldDraft = [
+    '> 第一行原文',
+    '> 第二行原文',
+    '',
+    '【批注 1 · 第3轮 · DSH 回复】',
+    '被批注的老原文',
+    '批注：老的评语',
+    '',
+    '用户自己写的 @notes.md 和别的字',
+  ].join('\n')
+  // 我们的重写：剥掉旧批注块，再把新的批注段追加到末尾（与 insert() 的管线一致）
+  const userText = stripQuoteBlocks(oldDraft, ['被批注的老原文'])
+  const section = renderAnnotationSection([{ turn: 2, kind: 'reply', quote: '被批注的老原文', comment: '老的评语', at: 1 }])
+  const nextDraft = [userText, section].filter((s) => s !== '').join('\n\n')
+
+  const st = {
+    draft: oldDraft,
+    occurrences: [{
+      occurrenceId: 'occ-1',
+      source: 'file',
+      ref: 'dsh-resource://file/absolute/D:/ws/notes.md',
+      label: 'notes.md',
+      clipboardText: '@notes.md',
+      offset: oldDraft.indexOf('@notes.md'),
+      length: '@notes.md'.length,
+    }],
+  }
+  const chips = carryComposerChips(st, oldDraft, nextDraft)
+  assert.equal(chips.quotes.length, 1)
+  assert.equal(chips.quotes[0].text, '第一行原文\n第二行原文')
+  assert.equal(nextDraft.slice(chips.quotes[0].offset, chips.quotes[0].offset + chips.quotes[0].length), '> 第一行原文\n> 第二行原文')
+  assert.equal(chips.references.length, 1)
+  assert.equal(chips.references[0].occurrenceId, undefined)
+  assert.equal(chips.references[0].clipboardText, '@notes.md')
+  assert.equal(nextDraft.slice(chips.references[0].offset, chips.references[0].offset + chips.references[0].length), '@notes.md')
+})
+
+test('Composer chips: a quote that only existed inside the removed block is not resurrected', () => {
+  const oldDraft = [
+    '【批注 1 · 第1轮 · DSH 回复】',
+    '> 被引用进批注块的文字',
+    '批注：评语',
+  ].join('\n')
+  const nextDraft = ''
+  const chips = carryComposerChips({ draft: oldDraft, occurrences: [] }, oldDraft, nextDraft)
+  assert.equal(chips.quotes.length, 0)
+  assert.equal(chips.references.length, 0)
+})
+
+test('Composer chips: setDraftKeepingChips uses an object only when chips exist', () => {
+  const calls = []
+  const input = {
+    setDraft(arg) { calls.push(arg) },
+  }
+  const plain = setDraftKeepingChips(input, { draft: '普通文字', occurrences: [] }, '普通文字和更多')
+  assert.equal(plain, 0)
+  assert.equal(typeof calls[0], 'string')
+
+  const oldDraft = '> 引用一行\n\n用户文字'
+  const kept = setDraftKeepingChips(input, { draft: oldDraft, occurrences: [] }, '用户文字')
+  assert.equal(kept, 0) // 引用被删掉了（新草稿里没有那行）→ 没有 chip 可保留
+  assert.equal(typeof calls[1], 'string')
+
+  const kept2 = setDraftKeepingChips(input, { draft: oldDraft, occurrences: [] }, '> 引用一行\n\n用户文字 + 新批注')
+  assert.equal(kept2, 1)
+  assert.equal(typeof calls[2], 'object')
+  assert.equal(calls[2].text, '> 引用一行\n\n用户文字 + 新批注')
+  assert.equal(calls[2].quotes.length, 1)
+  assert.equal(calls[2].references.length, 0)
+})
+
+test('Composer chips: decodeDraftQuote mirrors the host quoteTextOf rule', () => {
+  assert.equal(decodeDraftQuote('> 甲\n>   乙\n>'), '甲\n  乙\n')
+  assert.equal(nativeSurfaceRect(), null)
 })
