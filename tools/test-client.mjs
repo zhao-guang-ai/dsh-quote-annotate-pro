@@ -1469,6 +1469,8 @@ function selectionFixture({ previewOpen = true, previewEditable = false, compose
   })
   const React = {
     useSyncExternalStore() {}, useEffect() {}, useState: () => [0, () => {}],
+    useLayoutEffect() {}, useRef: () => ({ current: null }),
+    useCallback: (fn) => fn, useMemo: (fn) => fn(),
     createElement: (type, props, ...children) => ({ type, props, children }),
   }
   const api = captured.factory(() => React)
