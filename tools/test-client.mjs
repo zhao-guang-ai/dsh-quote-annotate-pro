@@ -1558,6 +1558,158 @@ test('read-only and editable document previews still offer annotations', () => {
   }
 })
 
+// Exercise the registered components and their real event handlers without a browser.
+function annotationInsertionFixture({ bindingAvailable = true, failWrite = false } = {}) {
+  const components = new Map()
+  const states = new Map()
+  const calls = []
+  const sessionId = 'annotation-session'
+  const sessionCtx = {}
+  const path = '/notes/review.md'
+  const rect = { left: 100, top: 100, right: 700, bottom: 600, width: 600, height: 500 }
+  let draft = 'Keep my draft'
+  let hooks
+  let cursor
+  let spec
+  const document = { body: {}, querySelectorAll: () => [] }
+  runInNewContext(SOURCE, {
+    window: {
+      __ModuleLoader__: { load: (value) => { spec = value } },
+      getSelection: () => null, innerWidth: 1280, innerHeight: 800,
+    },
+    document, console: { log() {}, error() {} }, setTimeout: () => 0, clearTimeout() {},
+  })
+  const React = {
+    useSyncExternalStore() {}, useEffect() {}, useMemo: (fn) => fn(),
+    useRef: (current) => ({ current }),
+    useState(initial) {
+      const index = cursor++
+      if (!(index in hooks)) hooks[index] = initial
+      const state = hooks
+      return [state[index], (value) => { state[index] = typeof value === 'function' ? value(state[index]) : value }]
+    },
+    createElement: (type, props, ...children) => ({ type, props, children }),
+  }
+  const api = spec.factory(() => React)
+  const render = (id, props = {}) => {
+    if (!states.has(id)) states.set(id, [])
+    hooks = states.get(id)
+    cursor = 0
+    return components.get(id)(props)
+  }
+  const input = {
+    state: { getSnapshot: () => ({ draft }) },
+    setDraft(value) {
+      if (failWrite) throw new Error('write refused')
+      draft = value
+      calls.push('setDraft')
+    },
+    focus() {
+      assert.ok(render('quote-pro-annotation-editor').props.className.includes('hidden'), 'close the annotation editor before focusing')
+      calls.push('focus')
+    },
+    submit() { calls.push('submit') },
+  }
+  const slots = {
+    inject: (_name, register) => register(),
+    register: (options, component) => components.set(options.id, component),
+  }
+  const services = {
+    slots,
+    locale: { getLocale: () => ({ active: 'en-US' }) },
+    sessions: { binding: (id) => {
+      assert.equal(id, sessionId)
+      return bindingAvailable ? { ctx: sessionCtx } : undefined
+    } },
+    conversation: { input: { for: (ctx) => { assert.equal(ctx, sessionCtx); return input } } },
+  }
+  api.apply({ get: (name) => services[name], effect() {} })
+  const find = (tree, className) => {
+    if (Array.isArray(tree)) return tree.map((child) => find(child, className)).find(Boolean)
+    if (!tree || typeof tree !== 'object') return undefined
+    if (tree.props && (tree.props.className || '').split(' ').includes(className)) return tree
+    return find(tree.children, className)
+  }
+  return {
+    calls, input, render, find, draft: () => draft,
+    openChat(comment = '') {
+      const chat = { nodes: new Map([['reply', {
+        kind: 'assistant-step', anchorSeq: 1,
+        data: { turn: 0, blocks: [{ kind: 'text', text: 'Selected reply' }] },
+      }]]) }
+      const actions = render('quote-turn-actions', { sessionId, turn: { turn: 0 }, useChat: (select) => select(chat) })
+      find(actions, 'dshq-btn').props.onClick({ currentTarget: { getBoundingClientRect: () => rect } })
+      const editor = render('quote-pro-annotation-editor')
+      find(editor, 'dshq-editor-input').props.onChange({ target: { value: comment } })
+      return render('quote-pro-annotation-editor')
+    },
+    fileNotes() {
+      const root = { parentElement: document.body, getBoundingClientRect: () => rect,
+        querySelector: (selector) => selector === '[data-textpreview-path]' ? { textContent: path } : null }
+      api.__test.docProbes.add({ path, sessionId, node: { isConnected: true, parentElement: root } })
+      api.__test.docNotesStore.add(sessionId, path, { quote: 'Selected document text', comment: 'Review this' })
+      return { bar: render('quote-pro-doc-notes-bar'), notes: () => api.__test.docNotesStore.get(sessionId, path) }
+    },
+  }
+}
+
+for (const gesture of ['click', 'Enter']) {
+  for (const comment of ['', 'My comment']) {
+    test('chat insertion focuses the composer after ' + gesture + (comment ? ' with a comment' : ' without a comment'), () => {
+      const f = annotationInsertionFixture()
+      const editor = f.openChat(comment)
+      assert.deepEqual(f.calls, [], 'opening the annotation editor does not focus the composer')
+      if (gesture === 'click') {
+        f.find(editor, 'dshq-primary').props.onClick()
+      } else {
+        f.find(editor, 'dshq-editor-input').props.onKeyDown({
+          key: 'Enter', preventDefault: () => f.calls.push('preventDefault'),
+          stopPropagation: () => f.calls.push('stopPropagation'),
+        })
+      }
+      assert.deepEqual(f.calls, gesture === 'click' ? ['setDraft', 'focus'] : ['preventDefault', 'stopPropagation', 'setDraft', 'focus'])
+      assert.ok(f.draft().startsWith('Keep my draft\n\n'))
+      assert.ok(f.draft().includes('Selected reply'))
+      if (comment) assert.ok(f.draft().includes('Comment: ' + comment))
+    })
+  }
+}
+
+test('chat insertion does not focus on cancel, unavailable binding, or failed draft write', () => {
+  for (const options of [{}, { bindingAvailable: false }, { failWrite: true }]) {
+    const f = annotationInsertionFixture(options)
+    const editor = f.openChat()
+    if (!Object.keys(options).length) f.find(editor, 'dshq-editor-input').props.onKeyDown({ key: 'Escape' })
+    else f.find(editor, 'dshq-primary').props.onClick()
+    assert.deepEqual(f.calls, [])
+    assert.equal(f.draft(), 'Keep my draft')
+  }
+})
+
+test('document Send all focuses the composer after writing and clearing notes, without submitting', () => {
+  const f = annotationInsertionFixture()
+  const { bar, notes } = f.fileNotes()
+  const focus = f.input.focus
+  f.input.focus = () => { assert.equal(notes().length, 0, 'clear notes before focusing'); focus() }
+  assert.deepEqual(f.calls, [], 'collecting notes does not focus the composer')
+  f.find(bar, 'dshq-doc-bar-send').props.onClick()
+  assert.deepEqual(f.calls, ['setDraft', 'focus'])
+  assert.equal(notes().length, 0)
+  assert.ok(f.draft().startsWith('Keep my draft\n\n'))
+  assert.ok(f.draft().includes('Selected document text'))
+})
+
+test('document Send all preserves notes and focus when insertion fails', () => {
+  for (const options of [{ bindingAvailable: false }, { failWrite: true }]) {
+    const f = annotationInsertionFixture(options)
+    const { bar, notes } = f.fileNotes()
+    f.find(bar, 'dshq-doc-bar-send').props.onClick()
+    assert.deepEqual(f.calls, [])
+    assert.equal(notes().length, 1)
+    assert.equal(f.draft(), 'Keep my draft')
+  }
+})
+
 test('Display resources: both locales and the existing icon are exported and packaged', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   assert.equal(pkg.exports['./client'], './lib/client.js')
