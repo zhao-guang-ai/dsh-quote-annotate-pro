@@ -210,12 +210,63 @@ test('looksLikeQuoteFragment：删了一半的位置行也要认出来（否则�
   assert.equal(looksLikeQuoteFragment('· 第14轮 · DSH 回复'), true)
   assert.equal(looksLikeQuoteFragment('引用 · 第2轮'), true)
   assert.equal(looksLikeQuoteFragment('批注'), true) // 删到只剩一个词（用户截图里的残片）
-  assert.equal(looksLikeQuoteFragment('引用：'), true)
+  assert.equal(looksLikeQuoteFragment('批注 2'), true)
   assert.equal(looksLikeQuoteFragment('〔位置行'), true)
-  assert.equal(looksLikeQuoteFragment('第3轮 DSH 回复'), true)
+  assert.equal(looksLikeQuoteFragment('第3轮 · DSH 回复'), true) // 词头被删、但还带分隔点
   assert.equal(looksLikeQuoteFragment('我自己写的普通文字'), false)
   assert.equal(looksLikeQuoteFragment('第3轮的答案不对'), false) // 用户自己的短句，不能误伤
+  assert.equal(looksLikeQuoteFragment('引用：'), false) // 冒号不是位置行的分隔符（issue #7）
+  assert.equal(looksLikeQuoteFragment('第3轮 DSH 回复'), false) // 没有分隔点，可能是用户在说事
   assert.equal(looksLikeQuoteFragment(''), false)
+})
+
+// issue #7：残片启发式把用户自己写的内容整行删掉（数据丢失）
+test('looksLikeQuoteFragment：用户自己的 markdown 链接 / 【】标题 / 普通句子都不许认领', () => {
+  const userLines = [
+    '[dsh-quote-annotate-pro](https://github.com/zhao-guang-ai/dsh-quote-annotate-pro)',
+    '- [ ] 待办：补测试',
+    '![截图](./docs/images/01-hero.png)',
+    '【重要】先改这个',
+    '【注意】这里有坑',
+    '引用：官方文档说要先装依赖',
+    'Annotation 2 是错的',
+    '第3轮 你说了啥',
+    'Turn 4 的解释不够清楚',
+    '批注功能挺好用的',
+    'Quoted text is fine here',
+  ]
+  for (const line of userLines) {
+    assert.equal(looksLikeQuoteFragment(line), false, `不该认领：${line}`)
+  }
+  // 真的残片仍然要认出来
+  assert.equal(looksLikeQuoteFragment('【引用 · 第12轮 · DSH 回复】'), true)
+  assert.equal(looksLikeQuoteFragment('【批注 2 · 第3轮 · 你的消息（请按「Annotation 2：」…）】'), true)
+  assert.equal(looksLikeQuoteFragment('引用 · 第14轮'), true)
+  assert.equal(looksLikeQuoteFragment('批注 1 · 第3轮'), true)
+  assert.equal(looksLikeQuoteFragment('（请按「Annotation 1：」「Annotation 2：」…逐条回应）'), true)
+  assert.equal(looksLikeQuoteFragment('【批注 2'), true)
+})
+
+test('stripQuoteBlocks：用户自己写的链接/标题行不会被当残片吞掉', () => {
+  const draft = [
+    '[参考链接](https://example.com/a)',
+    '【重要】先看这一段',
+    '引用：官方文档这么写',
+    '',
+    '【批注 1 · 第1轮 · 你的消息】',
+    '选中的原文',
+    '',
+    '批注：改一下',
+    '',
+    '我的问题',
+  ].join('\n')
+  assert.equal(stripQuoteBlocks(draft, ['选中的原文']), [
+    '[参考链接](https://example.com/a)',
+    '【重要】先看这一段',
+    '引用：官方文档这么写',
+    '',
+    '我的问题',
+  ].join('\n').replace(/\n{3,}/g, '\n\n'))
 })
 
 test('stripQuoteBlocks：块、孤儿评语、删除残片都不留，用户文字按原顺序保留', () => {
