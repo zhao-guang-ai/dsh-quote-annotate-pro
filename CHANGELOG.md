@@ -2,6 +2,21 @@
 
 本项目的所有重要变更都记在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## 0.5.5 — 全屏预览时批注浮条/气泡不再被盖住
+
+DSH 右侧栏进入**全屏预览**（docx / PDF / Excel / Markdown / 代码）后，批注浮条、划词气泡、批注编辑器全都看不见也点不到：
+宿主把右侧栏 dock 层提到 `z-index:40`（默认 10），而 `shell.overlay` 层固定 `20`，插件的浮层被整层压住。
+上游化自 @DoggyHU fork 的 0.3.13。
+
+- 全屏时把 `shell.overlay` 抬到 `z-index:70`（仍高于浮动窗的 `--dsh-dockkit-float-layer:60`），非全屏不动：
+  `[data-rightbar-fullscreen] [data-shell-overlay]` / `body:has([data-sidebar-right-panel=fullscreen]) [data-shell-overlay]`；
+- 两个选择器都对着，是因为宿主同时用了两种标记：frame 上的 `data-rightbar-fullscreen`，和
+  dock 面板上的 `data-sidebar-right-panel="fullscreen"`（后者靠 `:has()` 兜底，WebView2 / Chromium 已支持）；
+- 纯 z-index 调整，不影响非全屏布局，也不改任何交互逻辑。
+
+验证：`node --check`、`tools/check-manifest.mjs`、`npm test` **109/109**；另外用 Edge headless 建了三种宿主结构的模型页
+（无全屏 / frame 标记 / dock 面板标记）读 `getComputedStyle(overlay).zIndex`，结果分别是 `20 / 70 / 70`。
+
 ## 0.5.4 — 不再误删你手打的文字（残片清理加门控）
 
 issue #7（@feidky）报的是**数据丢失**：在输入框里手打一行 `[标题](https://…)` 或 `【重要】先改这个`，
