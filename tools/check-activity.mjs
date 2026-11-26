@@ -168,6 +168,26 @@ if (!forks) {
     if (missing.length > 0) {
       problems.push(`${owner} 有 ${missing.length} 个未上游的 commit：${missing.map((c) => c.sha).join(', ')}`)
     }
+
+    // 别的分支：有人可能把改动推在一个分支上、连 PR 都没开（main 的 compare 看不到）
+    const branches = tryGh(['api', `repos/${owner}/dsh-quote-annotate-pro/branches?per_page=100`])
+    if (Array.isArray(branches)) {
+      for (const br of branches) {
+        if (br.name === (f.default_branch || 'main')) continue
+        const bc = tryGh(['api', `repos/${REPO}/compare/main...${owner}:${br.name}`])
+        if (!bc || bc.ahead_by === 0) continue
+        const bcommits = (bc.commits || []).map((c) => ({
+          sha: c.sha.slice(0, 7),
+          subject: String(c.commit && c.commit.message ? c.commit.message.split(String.fromCharCode(10))[0] : ''),
+        }))
+        const bmissing = bcommits.filter((c) => !(registry.has(c.sha) || isPorted(c.subject, upstreamSubjects)))
+        line(`      分支 ${br.name} ahead=${bc.ahead_by}${bmissing.length === 0 ? '  [已上游]' : '  ← 有未上游提交'}`)
+        for (const c of bmissing.slice(0, 8)) line(`        · ${c.sha} ${c.subject}`)
+        if (bmissing.length > 0) {
+          problems.push(`${owner}:${br.name} 分支有 ${bmissing.length} 个未上游的 commit：${bmissing.map((c) => c.sha).join(', ')}`)
+        }
+      }
+    }
   }
 }
 
